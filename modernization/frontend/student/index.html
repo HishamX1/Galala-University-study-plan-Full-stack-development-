@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Study Plan Center — Galala University</title>
+  <meta name="description" content="Explore your academic journey at Galala University. Browse faculties, programs, and course structures with interactive visualizations.">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+
+  <!-- Design System -->
+  <link rel="stylesheet" href="../design-system.css">
+
+  <!-- Student Portal Styles -->
+  <link rel="stylesheet" href="./student.css">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="../images/GU-Logo-Color-Original.png">
+</head>
+<body>
+  <!-- Background Image Layer -->
+  <div id="bg-layer" class="bg-layer"></div>
+  <div id="bg-overlay" class="bg-overlay"></div>
+
+  <a href="#main-content" class="skip-link">Skip to main content</a>
+
+  <!-- ============================================
+       HEADER — Solid Medium Size
+       ============================================ -->
+  <header class="gu-header">
+    <div class="gu-header-content">
+      <a href="../index.html" class="logo-link" aria-label="Galala University Home">
+        <img src="../images/GU-Logo-Color-Original.png" alt="Galala University" class="gu-logo">
+      </a>
+      <div class="gu-header-text">
+        <h1>Galala University Study Plan Center</h1>
+        <p class="gu-header-subtitle">Explore your academic journey</p>
+      </div>
+      <nav class="gu-header-nav" aria-label="Primary navigation">
+        <a href="../index.html">Home</a>
+        <a href="../index.html#overview" aria-label="Overview">Overview</a>
+        <button type="button" id="programs-nav-btn" class="gu-header-nav-btn" aria-haspopup="true" aria-expanded="false">Programs</button>
+        <a href="../admin/index.html" title="Admin Portal">Admin</a>
+      </nav>
+    </div>
+
+    <!-- Programs Dropdown -->
+    <div id="programs-dropdown" class="programs-dropdown" aria-hidden="true">
+      <div class="programs-dropdown-inner">
+        <div class="programs-dropdown-faculties" id="programs-dropdown-faculties">
+          <!-- Dynamically populated -->
+        </div>
+        <div class="programs-dropdown-flyout" id="programs-dropdown-flyout">
+          <!-- Dynamically populated on hover -->
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============================================
+       MAIN CONTENT
+       ============================================ -->
+  <main id="main-content" class="gu-main">
+
+    <!-- SIDEBAR -->
+    <aside class="gu-sidebar" aria-label="Filters and navigation">
+
+      <!-- Filters Card -->
+      <div class="gu-card filters-card">
+        <div class="gu-card-header">
+          <h2 class="gu-card-title">Filters</h2>
+          <button class="gu-btn gu-btn--ghost gu-btn--sm" id="clear-filters-btn" aria-label="Clear all filters">Clear</button>
+        </div>
+
+        <div class="filter-section">
+          <div class="gu-form-group">
+            <label class="gu-label" for="filter-faculty">Faculty</label>
+            <select id="filter-faculty" class="gu-select" aria-label="Filter by faculty">
+              <option value="">All Faculties</option>
+            </select>
+          </div>
+
+          <div class="gu-form-group">
+            <label class="gu-label" for="filter-program">Program</label>
+            <select id="filter-program" class="gu-select" disabled aria-label="Filter by program">
+              <option value="">Select faculty first</option>
+            </select>
+          </div>
+
+          <div class="gu-form-group">
+            <label class="gu-label" for="filter-year">Year</label>
+            <select id="filter-year" class="gu-select" disabled aria-label="Filter by year">
+              <option value="">Select program first</option>
+            </select>
+          </div>
+
+          <div class="gu-form-group">
+            <label class="gu-label" for="filter-semester">Semester</label>
+            <select id="filter-semester" class="gu-select" disabled aria-label="Filter by semester">
+              <option value="">Select year first</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Active Filters -->
+        <div id="active-filters" class="active-filters" style="display: none;">
+          <h4 class="gu-label">Active Filters</h4>
+          <div id="active-filters-list" class="active-filters-list"></div>
+        </div>
+      </div>
+
+      <!-- Navigation History -->
+      <div class="gu-card history-card">
+        <div class="gu-card-header">
+          <h2 class="gu-card-title">Recent</h2>
+        </div>
+        <ul id="history-list" class="history-list" aria-label="Navigation history">
+          <li class="history-empty">No recent items</li>
+        </ul>
+      </div>
+
+    </aside>
+
+    <!-- CONTENT AREA -->
+    <div class="gu-content">
+
+      <!-- Breadcrumb -->
+      <nav class="gu-breadcrumb" id="breadcrumb-container" aria-label="Breadcrumb">
+        <span class="gu-breadcrumb-item active">Home</span>
+      </nav>
+
+      <!-- Search Bar -->
+      <div class="search-section gu-card" id="programs">
+        <div class="search-wrapper">
+          <div class="search-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+          </div>
+          <input type="text" id="course-search" class="gu-input search-input" placeholder="Search courses by code or name..." aria-label="Search courses">
+          <button id="search-btn" class="gu-btn gu-btn--primary" aria-label="Search">Search</button>
+        </div>
+        <datalist id="course-search-suggestions"></datalist>
+      </div>
+
+      <!-- Main Visualization Area -->
+      <div id="visualization-container" class="visualization-container">
+
+        <!-- Loading State -->
+        <div id="loading-state" class="gu-loading" style="display: none;">
+          <div class="gu-spinner"></div>
+          <p>Loading courses...</p>
+        </div>
+
+        <!-- Error State -->
+        <div id="error-state" class="gu-empty" style="display: none;">
+          <div class="gu-empty-icon">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="12"></line>
+              <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+          </div>
+          <h3 class="gu-empty-title">Something went wrong</h3>
+          <p class="gu-empty-text" id="error-message">Unable to load data. Please try again.</p>
+          <button class="gu-btn gu-btn--primary" onclick="location.reload()">Reload</button>
+        </div>
+
+        <!-- Empty State -->
+        <div id="empty-state" class="gu-empty" style="display: none;">
+          <div class="gu-empty-icon">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+          </div>
+          <h3 class="gu-empty-title">No courses found</h3>
+          <p class="gu-empty-text">Try adjusting your filters or search query.</p>
+          <button class="gu-btn gu-btn--secondary" id="clear-search-btn">Clear filters</button>
+        </div>
+
+        <!-- Overview View (Default) -->
+        <div id="overview-view" class="view-section">
+          <div class="view-header" id="overview-header">
+            <button class="gu-btn gu-btn--ghost back-btn" id="programs-back-btn" data-action="back" style="display: none;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M19 12H5M12 19l-7-7 7-7"/>
+              </svg>
+              Back to Faculties
+            </button>
+            <h2>Explore Programs</h2>
+            <p class="text-muted">Select a faculty and program to view the study plan structure.</p>
+          </div>
+          <div id="faculty-grid" class="faculty-grid">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+
+        <!-- Semester Grid View -->
+        <div id="semester-view" class="view-section" style="display: none;">
+          <div class="view-header">
+            <button class="gu-btn gu-btn--ghost back-btn" data-action="back">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M19 12H5M12 19l-7-7 7-7"/>
+              </svg>
+              Back
+            </button>
+            <h2 id="semester-view-title">Semesters</h2>
+          </div>
+          <div id="semester-grid" class="semester-grid">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+
+        <!-- Course List View -->
+        <div id="course-view" class="view-section" style="display: none;">
+          <div class="view-header">
+            <button class="gu-btn gu-btn--ghost back-btn" data-action="back">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M19 12H5M12 19l-7-7 7-7"/>
+              </svg>
+              Back
+            </button>
+            <h2 id="course-view-title">Courses</h2>
+          </div>
+          <div class="gu-table-wrapper">
+            <table class="gu-table" id="courses-table">
+              <thead>
+                <tr>
+                  <th data-sortable="code">Code</th>
+                  <th data-sortable="name">Name</th>
+                  <th data-sortable="credits">Credits</th>
+                  <th>Prerequisites</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="courses-tbody">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Search Results View -->
+        <div id="search-view" class="view-section" style="display: none;">
+          <div class="view-header">
+            <button class="gu-btn gu-btn--ghost back-btn" data-action="back">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M19 12H5M12 19l-7-7 7-7"/>
+              </svg>
+              Back to Overview
+            </button>
+            <h2 id="search-view-title">Search Results</h2>
+          </div>
+          <div id="search-results" class="search-results">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Course Detail Modal -->
+      <div id="course-modal" class="gu-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="gu-modal">
+          <div class="gu-modal-header">
+            <h3 class="gu-modal-title" id="modal-title">Course Details</h3>
+            <button class="gu-modal-close" aria-label="Close modal">&times;</button>
+          </div>
+          <div class="gu-modal-body" id="modal-body">
+            <!-- Dynamically populated -->
+          </div>
+          <div class="gu-modal-footer">
+            <button class="gu-btn gu-btn--secondary modal-close-btn">Close</button>
+            <button class="gu-btn gu-btn--primary" id="view-hierarchy-btn">View Hierarchy</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- ============================================
+       FOOTER
+       ============================================ -->
+  <footer class="gu-footer">
+    <div class="gu-container footer-content">
+      <div class="footer-section">
+        <h4>Galala University</h4>
+        <p class="text-muted">Study Plan Center — Academic Affairs</p>
+      </div>
+      <div class="footer-section">
+        <p class="text-muted">&copy; 2025 Galala University. All rights reserved.</p>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Scripts -->
+  <script src="../config.js"></script>
+  <script type="module" src="./student.js"></script>
+</body>
+</html>

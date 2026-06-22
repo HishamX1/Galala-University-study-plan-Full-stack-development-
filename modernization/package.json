@@ -1,0 +1,16 @@
+{
+  "name": "gu-pt-modernization",
+  "version": "1.3.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node backend/src/server.js",
+    "dev": "node --watch backend/src/server.js",
+    "check": "node --check backend/src/server.js && node --check backend/src/routes/catalogRoutes.js && node --check backend/src/services/catalogService.js && node --check backend/src/db/client.js && node --check scripts/smoke-test.js && node --check frontend/shared/apiConfig.js && node --check frontend/shared/catalogNormalizer.js && node --check frontend/student/student.js && node --check frontend/admin/admin.js && node --check frontend/admin/modules/apiClient.js && node --check frontend/admin/modules/dataLoader.js && node --check frontend/admin/modules/forms.js && node --check frontend/admin/modules/renderLists.js && node --check frontend/admin/modules/prerequisites.js",
+    "smoke": "node scripts/smoke-test.js"
+  },
+  "dependencies": {
+    "pg": "^8.11.5"
+  },
+  "description": "Canonical backend and frontend runtime for the Galala University study-plan platform"
+}

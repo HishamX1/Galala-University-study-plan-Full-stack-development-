@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Galala University Study Plan Center</title>
+  <meta name="description" content="Access the Galala University Study Plan Center student and admin portals." />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root { --navy:#08253d; --navy-2:#12365d; --gold:#d4af37; --bg:#f5f7fb; --card:rgba(255,255,255,0.86); --text:#10253d; --muted:#4d627a; --shadow:0 22px 60px rgba(8,37,61,0.2); --radius:24px; }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; min-height:100vh; color:var(--text); font-family:Inter,Cairo,system-ui,-apple-system,Segoe UI,sans-serif; background:var(--bg); overflow-x:hidden; }
+    .bg-layer,.bg-overlay { position:fixed; inset:0; pointer-events:none; }
+    .bg-layer { z-index:-2; background:linear-gradient(180deg, rgba(4,15,27,0.08), rgba(4,15,27,0.24)), url('images/landing-background.jpg') center/cover no-repeat; transform:scale(1.012); filter:saturate(1.12) contrast(1.04); }
+    .bg-overlay { z-index:-1; background:linear-gradient(180deg, rgba(5,18,32,0.2), rgba(5,18,32,0.05) 36%, rgba(5,18,32,0.28)), radial-gradient(circle at top left, rgba(212,175,55,0.13), transparent 34%), radial-gradient(circle at bottom right, rgba(18,54,93,0.15), transparent 44%); }
+    .shell { width:min(1180px, calc(100% - 32px)); margin:0 auto; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:22px 0 12px; }
+    .brand { display:flex; align-items:center; gap:16px; text-decoration:none; color:inherit; }
+    .brand img { width:150px; height:auto; object-fit:contain; filter:drop-shadow(0 10px 18px rgba(0,0,0,0.18)); }
+    .brand-copy h1 { margin:0; font-size:clamp(1.4rem, 3vw, 2.1rem); line-height:1.1; font-weight:800; color:#fff; text-shadow:0 6px 24px rgba(0,0,0,0.38); }
+    .brand-copy p { margin:6px 0 0; color:rgba(255,255,255,0.9); font-size:0.98rem; }
+    .hero { padding:34px 0 22px; }
+    .section { margin:20px 0; }
+    .hero-panel,.overview-panel,.portal-section { background:var(--card); border:1px solid rgba(255,255,255,0.68); border-radius:30px; box-shadow:var(--shadow); backdrop-filter:blur(12px); padding:clamp(24px, 4vw, 44px); }
+    .hero-panel { max-width:860px; }
+    .eyebrow { display:inline-flex; align-items:center; gap:8px; border-radius:999px; padding:8px 14px; background:rgba(212,175,55,0.15); color:var(--navy); font-weight:800; font-size:0.9rem; margin-bottom:18px; }
+    .eyebrow::before { content:''; width:10px; height:10px; border-radius:50%; background:var(--gold); box-shadow:0 0 0 4px rgba(212,175,55,0.18); }
+    h2 { margin:0; font-size:clamp(2rem, 4.5vw, 4rem); line-height:1.04; color:var(--navy); }
+    h3 { margin:0; color:var(--navy); }
+    p { color:#304961; line-height:1.7; }
+    .hero-panel p { margin:18px 0 0; max-width:68ch; font-size:1.05rem; }
+    .overview-panel { display:grid; grid-template-columns:minmax(0,0.95fr) minmax(0,1.05fr); gap:28px; align-items:stretch; }
+    .overview-copy { display:flex; flex-direction:column; justify-content:center; }
+    .overview-copy h2 { font-size:clamp(1.8rem, 3vw, 2.7rem); }
+    .overview-copy p { margin:14px 0 0; }
+    .feature-grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:14px; align-self:stretch; align-items:stretch; }
+    .feature-item { background:rgba(255,255,255,0.7); border:1px solid rgba(8,37,61,0.08); border-left:4px solid var(--gold); border-radius:16px; padding:18px; box-shadow:0 10px 24px rgba(8,37,61,0.08); display:flex; flex-direction:column; justify-content:center; min-height:150px; height:100%; }
+    .feature-item h3 { font-size:1rem; margin-bottom:6px; }
+    .feature-item p { margin:0; font-size:0.92rem; color:#425a72; }
+    .portal-section h2 { font-size:clamp(1.8rem, 3vw, 2.7rem); margin-bottom:10px; }
+    .portal-section > p { margin:0 0 22px; max-width:70ch; }
+    .card-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:18px; align-items:stretch; }
+    .portal-card { position:relative; overflow:hidden; min-height:350px; border-radius:22px; background:rgba(255,255,255,0.95); box-shadow:0 18px 45px rgba(8,37,61,0.15); border:1px solid rgba(255,255,255,0.78); display:flex; flex-direction:column; transition:transform .22s ease, box-shadow .22s ease, border-color .22s ease; }
+    .portal-card:hover { transform:translateY(-3px); box-shadow:0 24px 54px rgba(8,37,61,0.2); border-color:rgba(212,175,55,0.45); }
+    .portal-media { min-height:162px; background-size:cover; background-position:center; position:relative; }
+    .portal-media::after { content:''; position:absolute; inset:0; background:linear-gradient(180deg, rgba(5,15,29,0.02), rgba(5,15,29,0.28)); }
+    .student-card .portal-media { background-image:url('images/pt-background.jpg'); }
+    .admin-card .portal-media { background-image:url('images/landing-background.jpg'); }
+    .portal-body { padding:22px; display:flex; flex-direction:column; gap:14px; flex:1; }
+    .portal-badge { align-self:flex-start; padding:6px 10px; border-radius:999px; background:rgba(212,175,55,0.14); color:var(--navy); font-weight:800; font-size:0.82rem; }
+    .portal-card h3 { font-size:1.45rem; }
+    .portal-card p { margin:0; color:var(--muted); }
+    .portal-list { margin:0; padding-left:20px; color:#334a63; display:grid; gap:8px; line-height:1.55; }
+    .portal-actions { margin-top:auto; }
+    .btn { display:inline-flex; align-items:center; justify-content:center; min-height:48px; padding:0 20px; border-radius:999px; text-decoration:none; font-weight:800; transition:transform .2s ease, box-shadow .2s ease, background .2s ease; border:0; cursor:pointer; }
+    .btn:hover,.btn:focus-visible { transform:translateY(-1px); outline:none; }
+    .btn-primary { color:#fff; background:linear-gradient(135deg, var(--navy), var(--navy-2)); box-shadow:0 16px 28px rgba(8,37,61,0.24); }
+    .btn-primary:hover { box-shadow:0 20px 34px rgba(8,37,61,0.3); }
+    footer { padding:24px 0 34px; color:rgba(255,255,255,0.9); text-align:center; font-size:0.95rem; text-shadow:0 4px 18px rgba(0,0,0,0.3); }
+    .js .reveal-on-scroll { opacity:0; transform:translateY(18px); transition:opacity 0.7s ease, transform 0.7s cubic-bezier(0.22, 1, 0.36, 1); will-change:opacity, transform; }
+    .js .reveal-on-scroll.is-visible { opacity:1; transform:translateY(0); }
+    .js .reveal-on-scroll.delay-1 { transition-delay:0.08s; }
+    .js .reveal-on-scroll.delay-2 { transition-delay:0.16s; }
+    .js .portal-card.reveal-on-scroll.is-visible:hover { transform:translateY(-3px); }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior:auto; } .js .reveal-on-scroll { opacity:1; transform:none; transition:none; } .portal-card,.btn { transition:none; } }
+    @media (max-width: 920px) { .overview-panel,.card-grid { grid-template-columns:1fr; } .topbar { align-items:flex-start; } .feature-grid { grid-template-columns:1fr; } }
+  </style>
+  <script>document.documentElement.classList.add('js');</script>
+</head>
+<body>
+  <div class="bg-layer" aria-hidden="true"></div>
+  <div class="bg-overlay" aria-hidden="true"></div>
+
+  <div class="shell">
+    <header class="topbar reveal-on-scroll">
+      <a class="brand" href="./index.html" aria-label="Galala University Study Plan Center home">
+        <img src="images/GU-Logo-Color-Original.png" alt="Galala University logo">
+        <div class="brand-copy">
+          <h1>Galala University Study Plan Center</h1>
+          <p>Academic portals for students and administrators</p>
+        </div>
+      </a>
+    </header>
+
+    <main>
+      <section class="hero section" aria-labelledby="landing-title">
+        <div class="hero-panel reveal-on-scroll delay-1">
+          <span class="eyebrow">Academic platform</span>
+          <h2 id="landing-title">Explore and manage the study plan.</h2>
+          <p>
+            The Galala University Study Plan Center provides students and academic administrators with a unified platform for exploring, managing, and understanding academic study plans
+          </p>
+        </div>
+      </section>
+
+      <section class="overview-panel section reveal-on-scroll" id="overview" aria-labelledby="overview-title">
+        <div class="overview-copy">
+          <span class="eyebrow">System overview</span>
+          <h2 id="overview-title">Reliable academic structure.</h2>
+          <p>
+           The Study Plan Center helps students understand course progression, prerequisite requirements, and program structures throughout their university journey. At the same time, it provides academic staff with the tools needed to manage programs, courses, and curriculum relationships efficiently and accurately.
+          </p>
+        </div>
+        <div class="feature-grid" aria-label="Feature highlights">
+          <article class="feature-item reveal-on-scroll delay-1">
+            <h3>Student exploration</h3>
+            <p>Browse faculties, programs, semesters, courses, and prerequisite relationships with a guided hierarchy.</p>
+          </article>
+          <article class="feature-item reveal-on-scroll delay-2">
+            <h3>Admin management</h3>
+            <p>Administrators maintain the same data model used by the student view.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="portal-section section reveal-on-scroll" aria-labelledby="portal-title">
+        <h2 id="portal-title">Choose your portal</h2>
+        <p>Open the student experience to explore the study plan, or use the admin portal.</p>
+        <div class="card-grid" id="portal-cards">
+          <article class="portal-card student-card reveal-on-scroll delay-1">
+            <div class="portal-media" role="img" aria-label="Academic background for student portal"></div>
+            <div class="portal-body">
+              <span class="portal-badge">Student Portal</span>
+              <h3>Browse the study plan</h3>
+              <p>View faculties, programs, semesters, courses, and prerequisites in a clean academic flow.</p>
+              <ul class="portal-list">
+                <li>Faculty and program navigation</li>
+                <li>Semester and course browsing</li>
+                <li>Prerequisite hierarchy view</li>
+              </ul>
+              <div class="portal-actions">
+                <a class="btn btn-primary" href="./student/index.html">Enter Student Portal</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="portal-card admin-card reveal-on-scroll delay-2">
+            <div class="portal-media" role="img" aria-label="University background for admin portal"></div>
+            <div class="portal-body">
+              <span class="portal-badge">Admin Portal</span>
+              <h3>Manage data</h3>
+              <p>Add, edit, and manage faculties, programs, program courses, and prerequisite relationships.</p>
+              <ul class="portal-list">
+                <li>Faculty and program CRUD</li>
+                <li>Program-course management</li>
+              </ul>
+              <div class="portal-actions">
+                <a class="btn btn-primary" href="./admin/index.html">Enter Admin Portal</a>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="reveal-on-scroll">
+      <div>Galala University Study Plan Center</div>
+      <div>Academic Affairs - Student Portal - Admin Portal</div>
+    </footer>
+  </div>
+  <script>
+    (() => {
+      const items = document.querySelectorAll('.reveal-on-scroll');
+
+      if (!('IntersectionObserver' in window)) {
+        items.forEach((item) => item.classList.add('is-visible'));
+        return;
+      }
+
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('is-visible');
+            observer.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.16, rootMargin: '0px 0px -8% 0px' });
+
+      items.forEach((item) => observer.observe(item));
+    })();
+  </script>
+</body>
+</html>

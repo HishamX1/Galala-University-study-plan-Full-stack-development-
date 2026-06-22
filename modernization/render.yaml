@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: gu-pt-modernization
+    env: node
+    rootDir: modernization
+    buildCommand: npm install
+    startCommand: npm run start
+    envVars:
+      - key: PORT
+        value: 4000
+      - key: API_BASE_PATH
+        value: /api
+      - key: PG_SSL
+        value: true
+      - key: DATABASE_URL
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false

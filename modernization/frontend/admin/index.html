@@ -1,0 +1,156 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Galala University Study Plan Center - Admin</title>
+  <link rel="stylesheet" href="../styles.css" />
+  <meta name="gu-api-base" content="" />
+  <style>
+    /* Static Background image layer - NO fading */
+    .bg-layer {
+      position: fixed;
+      inset: 0;
+      z-index: -2;
+      background: url('../images/landing-background.jpg') no-repeat center center;
+      background-size: cover;
+    }
+    
+    .bg-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      background: linear-gradient(
+        180deg,
+        rgba(253, 248, 240, 0.3) 0%,
+        rgba(253, 248, 240, 0.5) 40%,
+        rgba(253, 248, 240, 0.7) 100%
+      );
+    }
+    
+    /* Card glass effect */
+    .card {
+      background: rgba(255, 255, 255, 0.85) !important;
+      backdrop-filter: blur(8px);
+    }
+    
+    /* Footer styling - static, no fade */
+    footer {
+      text-align: center;
+      padding: 24px;
+      background: linear-gradient(135deg, #002147 0%, #001530 100%);
+      color: rgba(255,255,255,0.7);
+      margin-top: 32px;
+    }
+    
+    footer p:first-child {
+      font-weight: 600;
+      color: #D4AF37;
+    }
+  </style>
+</head>
+<body>
+  <a href="#main-content" class="skip-link">Skip to main content</a>
+
+  <!-- Static Background Image Layer -->
+  <div class="bg-layer"></div>
+  <div class="bg-overlay"></div>
+
+  <!-- Header with student portal style logo -->
+  <header class="hero" id="admin-header">
+    <img src="../images/GU-Logo-Color-Original.png" alt="Galala University logo" class="logo" style="width: 180px; height: 55px; object-fit: contain; border-radius: 10px; background: white; padding: 6px;" />
+    <div>
+      <h1>Galala University Study Plan Center</h1>
+      <p>Admin Control Panel</p>
+    </div>
+    <nav class="nav" aria-label="Admin navigation">
+      <a href="../index.html">Home</a>
+      <a href="../student/index.html">Student Portal</a>
+    </nav>
+  </header>
+
+  <main id="main-content">
+    <section class="card" id="adminLoginCard">
+      <h2>Admin Login</h2>
+      <p class="error" id="authError"></p>
+      <label>Live API Base URL</label>
+      <input id="apiBaseUrl" placeholder="https://your-backend.example.com/api" />
+      <div class="grid">
+        <div><label>Username</label><input id="adminUsername" autocomplete="username" /></div>
+        <div><label>Password</label><input id="adminPassword" type="password" autocomplete="current-password" /></div>
+      </div>
+      <button id="adminLoginBtn">Login</button>
+    </section>
+
+    <section class="card" id="adminDashboard" hidden>
+      <h2>University Data Control Panel</h2>
+      <p class="error" id="error"></p>
+      <p class="success" id="success"></p>
+
+      <div class="grid admin-grid">
+        <div>
+          <h3>Add Faculty</h3>
+          <label>Faculty Name</label><input id="facultyName" required />
+          <button id="addFaculty">Add Faculty</button>
+          <div id="facultyList" class="entity-list"></div>
+        </div>
+
+        <div>
+          <h3>Add Program</h3>
+          <label>Faculty</label><select id="programFaculty" required></select>
+          <label>Program Name</label><input id="programName" required />
+          <label>Duration Years</label><select id="programDurationYears"><option value="4">4</option><option value="5">5</option></select>
+          <button id="addProgram">Add Program</button>
+          <div id="programList" class="entity-list"></div>
+        </div>
+
+        <div>
+          <h3>Add Course</h3>
+          <label>Program</label><select id="courseProgram" required></select>
+          <label>Year Number</label><input id="courseYearNo" type="number" min="1" max="5" required />
+          <label>Semester Number</label><input id="courseSemesterNo" type="number" min="1" max="10" required />
+          <label>Course Code</label><input id="courseCode" required />
+          <label>Course Name</label><input id="courseName" required />
+          <label>Credits</label><input id="courseCredits" type="number" min="0" max="30" required />
+          <label>Description</label><textarea id="courseDescription"></textarea>
+          <label>Prerequisites (course codes, comma-separated)</label><input id="coursePrereqs" placeholder="BMS115, BMS124" />
+          <button id="addCourse">Add Course</button>
+        </div>
+      </div>
+
+      <section class="card nested-card">
+        <h3>Course Manager</h3>
+        <table>
+          <thead><tr><th>Code</th><th>Name</th><th>Credits</th><th>Semester</th><th>Prerequisites</th><th>Actions</th></tr></thead>
+          <tbody id="courseList"></tbody>
+        </table>
+      </section>
+    </section>
+  </main>
+
+  <div class="dialog-backdrop" id="adminDialogBackdrop" hidden>
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="adminDialogTitle">
+      <form id="adminDialogForm">
+        <div class="dialog-header">
+          <h2 id="adminDialogTitle">Edit item</h2>
+          <button class="secondary icon-button" id="adminDialogClose" type="button" aria-label="Close dialog">x</button>
+        </div>
+        <p id="adminDialogDescription" class="dialog-description"></p>
+        <div id="adminDialogFields" class="dialog-fields"></div>
+        <div class="dialog-actions">
+          <button class="secondary" id="adminDialogCancel" type="button">Cancel</button>
+          <button id="adminDialogSubmit" type="submit">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <footer>
+    <p>&copy; 2026 Galala University. All rights reserved.</p>
+    <p>Admin Control Panel - Academic Affairs</p>
+  </footer>
+
+  <script src="../config.js"></script>
+  <script type="module" src="./admin.js"></script>
+</body>
+</html>
