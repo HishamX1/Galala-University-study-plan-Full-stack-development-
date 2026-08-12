@@ -1,0 +1,3 @@
+import { getApiCandidates, saveApiBase } from './shared/apiConfig.js';
+const form = document.getElementById('request-form'); const message = document.getElementById('request-message');
+form.addEventListener('submit', async (event) => { event.preventDefault(); const values = Object.fromEntries(new FormData(form)); try { for (const base of getApiCandidates()) { const response = await fetch(`${base}/auth/password-reset-requests`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(values) }); if (response.ok) { saveApiBase(base); message.textContent = (await response.json()).message; form.reset(); return; } } throw new Error('Unable to submit your request.'); } catch (error) { message.textContent = error.message; } });

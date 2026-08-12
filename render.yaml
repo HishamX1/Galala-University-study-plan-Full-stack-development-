@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: gu-pt-modernization
+    env: node
+    rootDir: modernization
+    buildCommand: npm ci
+    startCommand: npm run start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
+      - key: API_BASE_PATH
+        value: /api
+      - key: PG_SSL
+        value: true
+      - key: DATABASE_URL
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: COOKIE_SECURE
+        value: true
+      - key: COOKIE_SAME_SITE
+        value: None
