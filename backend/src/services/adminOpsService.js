@@ -1,5 +1,6 @@
 import { query, withPostgresClient } from '../db/client.js';
-import XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
+import { parseXlsxInWorker, XLSX_PARSER_LIMITS } from './xlsxImportParser.js';
 import { insertAuditLog, listAuditLogs } from '../repositories/auditRepository.js';
 import { findBackupSnapshot, insertBackup, listBackups } from '../repositories/backupRepository.js';
 import { insertImportedRow, readCatalogSnapshot, readImportReferences } from '../repositories/adminCatalogRepository.js';
@@ -11,6 +12,14 @@ const ENTITY_TABLES = {
   course: 'program_courses',
   relation: 'course_prerequisites'
 };
+
+export const IMPORT_LIMITS = Object.freeze({
+  maxFileBytes: XLSX_PARSER_LIMITS.maxFileBytes,
+  maxWorksheets: 1,
+  maxRows: 10_000,
+  maxColumns: 100,
+  maxCells: 100_000
+});
 
 function toInt(value) {
   return Number(value);
@@ -82,14 +91,20 @@ function normalizedExport(catalog) {
   };
 }
 
-function toWorkbookBuffer(data) {
-  const workbook = XLSX.utils.book_new();
+async function toWorkbookBuffer(data) {
+  const workbook = new ExcelJS.Workbook();
   const sheets = [
     ['Faculty', data.faculties], ['Program', data.programs], ['Course', data.courses],
     ['Prerequisites', data.prerequisites], ['Required For', data.requiredFor]
   ];
-  for (const [name, rows] of sheets) XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), name);
-  return XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer', compression: true });
+  for (const [name, rows] of sheets) {
+    const worksheet = workbook.addWorksheet(name);
+    if (rows.length) {
+      worksheet.columns = Object.keys(rows[0]).map((key) => ({ header: key, key }));
+      rows.forEach((row) => worksheet.addRow(row));
+    }
+  }
+  return workbook.xlsx.writeBuffer({ useStyles: false, useSharedStrings: false });
 }
 
 function parseCsv(text) {
@@ -120,13 +135,12 @@ function parseCsv(text) {
   return lines.slice(1).map((line) => Object.fromEntries(parseLine(line).map((cell, index) => [headers[index], cell])));
 }
 
-async function importRows({ type, format = 'json', content, fileContent }) {
+export async function importRows({ type, format = 'json', content, fileContent }) {
   if (format === 'xlsx') {
-    const XLSX = await import('xlsx');
-    const workbook = XLSX.read(Buffer.from(String(fileContent || ''), 'base64'), { type: 'buffer' });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    if (!sheet) throw new Error('The workbook has no readable worksheet');
-    return XLSX.utils.sheet_to_json(sheet, { defval: '' });
+    const encoded = String(fileContent || '');
+    const buffer = Buffer.from(encoded, 'base64');
+    if (!encoded || buffer.length === 0 || buffer.length > IMPORT_LIMITS.maxFileBytes) throw new Error('Import file exceeds the 5 MB limit');
+    return parseXlsxInWorker(buffer);
   }
   if (format === 'pdf') {
     const { PDFParse } = await import('pdf-parse');
@@ -359,7 +373,7 @@ export async function exportCatalog(format = 'json') {
     if (format === 'xlsx') return {
       filename: `catalog-export-${timestamp()}.xlsx`,
       mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      content: toWorkbookBuffer(exportData)
+      content: await toWorkbookBuffer(exportData)
     };
     return { filename: `catalog-export-${timestamp()}.json`, mimeType: 'application/json; charset=utf-8', content: JSON.stringify(exportData, null, 2) };
   });
@@ -399,7 +413,7 @@ export async function getBackupDownload(id) {
   return {
     filename: `catalog-backup-${row.id}-${timestamp()}.${row.format}`,
     mimeType: row.format === 'csv' ? 'text/csv; charset=utf-8' : row.format === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/json; charset=utf-8',
-    content: row.format === 'csv' ? toCsv(normalizedExport(row.snapshot).courses) : row.format === 'xlsx' ? toWorkbookBuffer(normalizedExport(row.snapshot)) : JSON.stringify(normalizedExport(row.snapshot), null, 2)
+    content: row.format === 'csv' ? toCsv(normalizedExport(row.snapshot).courses) : row.format === 'xlsx' ? await toWorkbookBuffer(normalizedExport(row.snapshot)) : JSON.stringify(normalizedExport(row.snapshot), null, 2)
   };
 }
 

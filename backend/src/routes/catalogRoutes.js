@@ -220,13 +220,13 @@ export async function handleApi(req, res, url) {
 
     if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/admin/import/validate`) {
       if (!requirePermission(res, user, Permissions.catalogImport)) return;
-      const body = await parseBody(req);
+      const body = await parseBody(req, 8 * 1024 * 1024);
       return json(res, 200, await validateImport(body));
     }
 
     if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/admin/import`) {
       if (!requirePermission(res, user, Permissions.catalogImport)) return;
-      const body = await parseBody(req);
+      const body = await parseBody(req, 8 * 1024 * 1024);
       const result = await importCatalog(body);
       return json(res, result.valid ? 201 : 400, result);
     }
