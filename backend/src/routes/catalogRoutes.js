@@ -1,25 +1,4 @@
-import {
-  addPrerequisiteRelation,
-  createFaculty,
-  createProgram,
-  createProgramCourse,
-  deleteFaculty,
-  deleteProgram,
-  deleteProgramCourse,
-  deletePrerequisiteRelation,
-  getCatalog,
-  getFaculties,
-  getPrerequisites,
-  getProgramCourseDeleteImpact,
-  getProgramCourses,
-  getProgramDeleteImpact,
-  getPrograms,
-  updateFaculty,
-  updatePrerequisites,
-  updatePrerequisiteVisibility,
-  updateProgram,
-  updateProgramCourse
-} from '../services/catalogService.js';
+import { getCatalog, getFaculties, getProgramCourses, getPrograms } from '../services/catalogService.js';
 import {
   createBackup,
   exportCatalog,
@@ -34,18 +13,7 @@ import {
   restoreRecycleItem,
   validateImport
 } from '../services/adminOpsService.js';
-import {
-  validateEntityId,
-  validateFaculty,
-  validateFacultyPatch,
-  validatePrerequisites,
-  validatePrerequisiteVisibility,
-  validateProgram,
-  validateProgramCourse,
-  validateProgramCoursePatch,
-  validateProgramPatch,
-  validatePrerequisiteRelation
-} from '../validation/schemas.js';
+import { validateEntityId } from '../validation/schemas.js';
 import { env } from '../config/env.js';
 import { databaseDiagnosticMessage } from '../db/client.js';
 import { currentUser, createUser, deleteUser, listUsers, resetUserPassword, updateUser, countSuperAdmins, listPasswordResetRequests, decidePasswordResetRequest, createComplaint, listComplaints, updateComplaint, createCommunication, listCommunications, getDashboardData, updateOwnProfile } from '../services/authService.js';
@@ -55,7 +23,7 @@ import { allowRequest } from '../security/rateLimiter.js';
 import { toErrorResponse } from '../utils/errors.js';
 import { download, json, parseBody } from '../middleware/http.js';
 import { handleAuthRequest } from '../controllers/authController.js';
-import { handleCatalogDelete, handleCatalogReadRequest, handleCatalogUpdate } from '../controllers/catalogController.js';
+import { handleCatalogReadRequest, handleCatalogRequest } from '../controllers/catalogController.js';
 
 function isAllowedCorsOrigin(origin) {
   return Boolean(origin) && env.corsOrigins.includes(origin);
@@ -104,10 +72,6 @@ function toNumber(value) {
   if (value === undefined || value === null || value === '') return undefined;
   const n = Number(value);
   return Number.isInteger(n) ? n : undefined;
-}
-
-function idFromPath(pathname) {
-  return toNumber(pathname.split('/').filter(Boolean).at(-1));
 }
 
 export async function handleApi(req, res, url) {
@@ -299,121 +263,7 @@ export async function handleApi(req, res, url) {
     }
 
     if (await handleCatalogReadRequest(req, res, url)) return true;
-
-    if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/faculties`) {
-      const body = await parseBody(req);
-      const err = validateFaculty(body);
-      if (err) return json(res, 400, { error: err });
-      const created = await createFaculty(body);
-      if (!created) return json(res, 409, { error: 'Faculty already exists' });
-      return json(res, 201, created);
-    }
-
-    if (req.method === 'PUT' && url.pathname.startsWith(`${env.apiBasePath}/faculties/`)) {
-      return handleCatalogUpdate(req, res, validateFacultyPatch, updateFaculty, idFromPath(url.pathname), 'Faculty');
-    }
-
-    if (req.method === 'DELETE' && url.pathname.startsWith(`${env.apiBasePath}/faculties/`)) {
-      return handleCatalogDelete(res, deleteFaculty, idFromPath(url.pathname), 'Faculty');
-    }
-
-    if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/programs`) {
-      const body = await parseBody(req);
-      const err = validateProgram(body);
-      if (err) return json(res, 400, { error: err });
-      const created = await createProgram(body);
-      if (!created) return json(res, 409, { error: 'Program already exists for this faculty' });
-      return json(res, 201, created);
-    }
-
-    if (req.method === 'PUT' && url.pathname.startsWith(`${env.apiBasePath}/programs/`)) {
-      return handleCatalogUpdate(req, res, validateProgramPatch, updateProgram, idFromPath(url.pathname), 'Program');
-    }
-
-    if (req.method === 'GET' && url.pathname.match(new RegExp(`^${env.apiBasePath}/programs/\\d+/delete-impact$`))) {
-      const id = toNumber(url.pathname.split('/').at(-2));
-      const idErr = validateEntityId(id, 'program id');
-      if (idErr) return json(res, 400, { error: idErr });
-      const impact = await getProgramDeleteImpact(id);
-      if (!impact) return json(res, 404, { error: 'Program not found' });
-      return json(res, 200, impact);
-    }
-
-    if (req.method === 'DELETE' && url.pathname.startsWith(`${env.apiBasePath}/programs/`)) {
-      return handleCatalogDelete(res, deleteProgram, idFromPath(url.pathname), 'Program');
-    }
-
-    if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/program-courses`) {
-      const body = await parseBody(req);
-      const err = validateProgramCourse(body);
-      if (err) return json(res, 400, { error: err });
-      const created = await createProgramCourse(body);
-      if (!created) return json(res, 409, { error: 'This course already exists.' });
-      return json(res, 201, created);
-    }
-
-    if (url.pathname.match(new RegExp(`^${env.apiBasePath}/program-courses/\\d+/prerequisites$`))) {
-      const id = toNumber(url.pathname.split('/').at(-2));
-      const idErr = validateEntityId(id, 'program course id');
-      if (idErr) return json(res, 400, { error: idErr });
-      if (req.method === 'GET') return json(res, 200, { prerequisiteCourseIds: await getPrerequisites(id) });
-      if (req.method === 'POST') {
-        const body = await parseBody(req);
-        const err = validatePrerequisiteRelation(body);
-        if (err) return json(res, 400, { error: err });
-        const created = await addPrerequisiteRelation(id, body.prerequisiteCourseId);
-        if (!created) return json(res, 409, { error: 'This relationship is already defined.' });
-        return json(res, 201, created);
-      }
-      if (req.method === 'PUT') {
-        const body = await parseBody(req);
-        const err = validatePrerequisites(body);
-        if (err) return json(res, 400, { error: err });
-        return json(res, 200, { prerequisiteCourseIds: await updatePrerequisites(id, body.prerequisiteCourseIds || []) });
-      }
-    }
-
-    if (req.method === 'PUT' && url.pathname.match(new RegExp(`^${env.apiBasePath}/program-courses/\\d+/prerequisites/\\d+/visibility$`))) {
-      const parts = url.pathname.split('/');
-      const id = toNumber(parts.at(-4));
-      const prerequisiteId = toNumber(parts.at(-2));
-      const idErr = validateEntityId(id, 'program course id') || validateEntityId(prerequisiteId, 'prerequisite course id');
-      if (idErr) return json(res, 400, { error: idErr });
-      const body = await parseBody(req);
-      const err = validatePrerequisiteVisibility(body);
-      if (err) return json(res, 400, { error: err });
-      const updated = await updatePrerequisiteVisibility(id, prerequisiteId, body.visibleToStudents);
-      if (!updated) return json(res, 404, { error: 'Prerequisite relation not found' });
-      return json(res, 200, { updated: true, courseId: id, prerequisiteCourseId: prerequisiteId, visibleToStudents: body.visibleToStudents });
-    }
-
-    if (req.method === 'DELETE' && url.pathname.match(new RegExp(`^${env.apiBasePath}/program-courses/\\d+/prerequisites/\\d+$`))) {
-      const parts = url.pathname.split('/');
-      const id = toNumber(parts.at(-3));
-      const prerequisiteId = toNumber(parts.at(-1));
-      const idErr = validateEntityId(id, 'program course id') || validateEntityId(prerequisiteId, 'prerequisite course id');
-      if (idErr) return json(res, 400, { error: idErr });
-      const deleted = await deletePrerequisiteRelation(id, prerequisiteId);
-      if (!deleted) return json(res, 404, { error: 'Prerequisite relation not found' });
-      return json(res, 200, { deleted: true, courseId: id, prerequisiteCourseId: prerequisiteId });
-    }
-
-    if (req.method === 'PUT' && url.pathname.startsWith(`${env.apiBasePath}/program-courses/`)) {
-      return handleCatalogUpdate(req, res, validateProgramCoursePatch, updateProgramCourse, idFromPath(url.pathname), 'Program course');
-    }
-
-    if (req.method === 'GET' && url.pathname.match(new RegExp(`^${env.apiBasePath}/program-courses/\\d+/delete-impact$`))) {
-      const id = toNumber(url.pathname.split('/').at(-2));
-      const idErr = validateEntityId(id, 'program course id');
-      if (idErr) return json(res, 400, { error: idErr });
-      const impact = await getProgramCourseDeleteImpact(id);
-      if (!impact) return json(res, 404, { error: 'Program course not found' });
-      return json(res, 200, impact);
-    }
-
-    if (req.method === 'DELETE' && url.pathname.startsWith(`${env.apiBasePath}/program-courses/`)) {
-      return handleCatalogDelete(res, deleteProgramCourse, idFromPath(url.pathname), 'Program course');
-    }
+    if (await handleCatalogRequest(req, res, url)) return true;
 
     return json(res, 404, { error: 'API route not found' });
   } catch (error) {
