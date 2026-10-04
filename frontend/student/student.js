@@ -1,6 +1,7 @@
 import { getApiCandidates, saveApiBase } from '../shared/apiConfig.js';
 import { normalizeCatalog } from '../shared/catalogNormalizer.js';
 import { restoreSession, signOut } from '../shared/session.js';
+import { escapeHtml } from '../shared/dom.js';
 
 const apiCandidates = getApiCandidates();
 let workingApiBase = apiCandidates[0] || '/api';
@@ -162,7 +163,7 @@ function showError(message) {
 }
 
 function optionHtml(items, label, value = 'id', empty = 'Select...') {
-  return `<option value="">${empty}</option>${items.map((item) => `<option value="${item[value]}">${item[label]}</option>`).join('')}`;
+  return `<option value="">${escapeHtml(empty)}</option>${items.map((item) => `<option value="${escapeHtml(item[value])}">${escapeHtml(item[label])}</option>`).join('')}`;
 }
 
 function updateStats() {
@@ -206,7 +207,7 @@ function renderActiveFilters({ facultyId = '', programId = '', yearNo = '', seme
 
   elements.activeFilters.style.display = chips.length ? 'block' : 'none';
   elements.activeFiltersList.innerHTML = chips
-    .map((label) => `<span class="active-filter-chip">${label}</span>`)
+    .map((label) => `<span class="active-filter-chip">${escapeHtml(label)}</span>`)
     .join('');
 }
 
@@ -251,8 +252,8 @@ function updateBreadcrumb(items) {
   elements.breadcrumb.innerHTML = items.map((item, index) => {
     const last = index === items.length - 1;
     return last
-      ? `<span class="breadcrumb-item active">${item.label}</span>`
-      : `<button class="breadcrumb-item" data-action="${item.action}">${item.label}</button>`;
+      ? `<span class="breadcrumb-item active">${escapeHtml(item.label)}</span>`
+      : `<button class="breadcrumb-item" data-action="${escapeHtml(item.action)}">${escapeHtml(item.label)}</button>`;
   }).join('<span class="breadcrumb-separator">/</span>');
   elements.breadcrumb.querySelectorAll('[data-action="overview"]').forEach((btn) => {
     btn.addEventListener('click', renderOverview);
@@ -282,7 +283,7 @@ function renderHistory() {
     elements.historyList.innerHTML = '<p class="text-muted" style="font-size: 0.875rem; padding: 0.5rem 0;">No recent views</p>';
     return;
   }
-  elements.historyList.innerHTML = state.history.map((item) => `<button class="history-item" data-type="${item.type}" data-id="${item.id}"><span>${item.label}</span></button>`).join('');
+  elements.historyList.innerHTML = state.history.map((item) => `<button class="history-item" data-type="${escapeHtml(item.type)}" data-id="${escapeHtml(item.id)}"><span>${escapeHtml(item.label)}</span></button>`).join('');
   elements.historyList.querySelectorAll('.history-item').forEach((btn) => {
     btn.addEventListener('click', () => {
       if (btn.dataset.type === 'faculty') renderProgramsForFaculty(btn.dataset.id);
@@ -304,8 +305,8 @@ function renderOverview() {
     const programs = state.data.programs.filter((program) => program.facultyId === faculty.id);
     const courseCount = state.data.programCourses.filter((course) => course.facultyId === faculty.id).length;
     return `
-      <div class="faculty-card" data-faculty-id="${faculty.id}" role="button" tabindex="0" aria-label="View ${faculty.name}">
-        <h3>${faculty.name}</h3>
+      <div class="faculty-card" data-faculty-id="${escapeHtml(faculty.id)}" role="button" tabindex="0" aria-label="View ${escapeHtml(faculty.name)}">
+        <h3>${escapeHtml(faculty.name)}</h3>
         <p>Explore the academic programs and course structure</p>
         <div class="faculty-stats">
           <div class="faculty-stat"><span>${programs.length} Programs</span></div>
@@ -335,8 +336,8 @@ function renderProgramsForFaculty(facultyId) {
   elements.facultyGrid.innerHTML = programs.map((program) => {
     const courseCount = state.data.programCourses.filter((course) => course.programId === program.id).length;
     return `
-      <div class="faculty-card program-card" data-program-id="${program.id}" role="button" tabindex="0">
-        <h3>${program.name}</h3>
+      <div class="faculty-card program-card" data-program-id="${escapeHtml(program.id)}" role="button" tabindex="0">
+        <h3>${escapeHtml(program.name)}</h3>
         <p>View the complete study plan structure</p>
         <div class="faculty-stats">
           <div class="faculty-stat"><span>${program.durationYears} Years</span></div>
@@ -368,13 +369,13 @@ function renderProgramSemesters(programId) {
       const courses = coursesFor(programId, yearNo, semesterNo);
       const credits = courses.reduce((sum, course) => sum + (course.credits || 0), 0);
       cards.push(`
-        <div class="semester-card" data-program-id="${programId}" data-year-no="${yearNo}" data-semester-no="${semesterNo}" role="button" tabindex="0">
-          <div class="semester-card-header"><h3>Semester ${semesterNo}</h3></div>
+        <div class="semester-card" data-program-id="${escapeHtml(programId)}" data-year-no="${escapeHtml(yearNo)}" data-semester-no="${escapeHtml(semesterNo)}" role="button" tabindex="0">
+          <div class="semester-card-header"><h3>Semester ${escapeHtml(semesterNo)}</h3></div>
           <div class="semester-stats">
             <span><strong>${courses.length}</strong> Courses</span>
             <span><strong>${credits}</strong> Credits</span>
           </div>
-          <div class="course-tags">${courses.slice(0, 4).map((course) => `<span class="course-tag">${course.code}</span>`).join('')}</div>
+          <div class="course-tags">${courses.slice(0, 4).map((course) => `<span class="course-tag">${escapeHtml(course.code)}</span>`).join('')}</div>
         </div>
       `);
     }
@@ -398,13 +399,13 @@ function renderCourseTable(programId, yearNo, semesterNo) {
     const prereqs = (course.prerequisiteCourseIds || []).map(courseById).filter(Boolean);
     return `
       <tr>
-        <td class="course-code-cell">${course.code}</td>
-        <td class="course-name-cell">${course.name}</td>
-        <td><strong>${course.credits}</strong></td>
-        <td class="prereq-cell">${prereqs.length ? prereqs.map((item) => `<span class="prereq-tag">${item.code}</span>`).join('') : '<span class="no-prereq">None</span>'}</td>
+        <td class="course-code-cell">${escapeHtml(course.code)}</td>
+        <td class="course-name-cell">${escapeHtml(course.name)}</td>
+        <td><strong>${escapeHtml(course.credits)}</strong></td>
+        <td class="prereq-cell">${prereqs.length ? prereqs.map((item) => `<span class="prereq-tag">${escapeHtml(item.code)}</span>`).join('') : '<span class="no-prereq">None</span>'}</td>
         <td class="actions-cell">
-          <button class="gu-btn gu-btn--primary gu-btn--sm" data-action="view-course" data-course-id="${course.id}">View</button>
-          <button class="gu-btn gu-btn--secondary gu-btn--sm" data-action="view-hierarchy" data-course-id="${course.id}">Hierarchy</button>
+          <button class="gu-btn gu-btn--primary gu-btn--sm" data-action="view-course" data-course-id="${escapeHtml(course.id)}">View</button>
+          <button class="gu-btn gu-btn--secondary gu-btn--sm" data-action="view-hierarchy" data-course-id="${escapeHtml(course.id)}">Hierarchy</button>
         </td>
       </tr>
     `;
@@ -420,7 +421,7 @@ function renderCourseTable(programId, yearNo, semesterNo) {
 
 function populateSearchSuggestions() {
   elements.searchSuggestions.innerHTML = state.data.programCourses
-    .map((course) => `<option value="${course.code}: ${course.name}">`)
+    .map((course) => `<option value="${escapeHtml(`${course.code}: ${course.name}`)}">`)
     .join('');
 }
 
@@ -435,10 +436,10 @@ function performSearch(query) {
   setBackgroundDepth(1);
   elements.searchViewTitle.textContent = `Search Results (${results.length})`;
   elements.searchResults.innerHTML = results.map((course) => `
-    <div class="search-result-card" data-course-id="${course.id}" role="button" tabindex="0">
+    <div class="search-result-card" data-course-id="${escapeHtml(course.id)}" role="button" tabindex="0">
       <div class="search-result-content">
-        <h4>${course.code} - ${course.name}</h4>
-        <p class="search-result-meta">${course.credits || 0} credits</p>
+        <h4>${escapeHtml(course.code)} - ${escapeHtml(course.name)}</h4>
+        <p class="search-result-meta">${escapeHtml(course.credits || 0)} credits</p>
       </div>
     </div>
   `).join('') || '<div class="gu-empty"><h3 class="gu-empty-title">No results found</h3></div>';
@@ -458,12 +459,12 @@ function showCourseModal(courseId) {
   elements.modalTitle.textContent = `${course.code} - ${course.name}`;
   elements.modalBody.innerHTML = `
     <div class="modal-course-details">
-      <div class="detail-group"><span class="detail-label">Faculty</span><span class="detail-value">${faculty?.name || 'N/A'}</span></div>
-      <div class="detail-group"><span class="detail-label">Program</span><span class="detail-value">${program?.name || 'N/A'}</span></div>
-      <div class="detail-group"><span class="detail-label">Year</span><span class="detail-value">${course.yearNo}</span></div>
-      <div class="detail-group"><span class="detail-label">Semester</span><span class="detail-value">${course.semesterNo}</span></div>
-      <div class="detail-group"><span class="detail-label">Credits</span><span class="detail-value">${course.credits || 0}</span></div>
-      <div class="detail-group"><span class="detail-label">Prerequisites</span><span class="detail-value">${prereqs.length ? prereqs.map((item) => item.code).join(', ') : 'None'}</span></div>
+      <div class="detail-group"><span class="detail-label">Faculty</span><span class="detail-value">${escapeHtml(faculty?.name || 'N/A')}</span></div>
+      <div class="detail-group"><span class="detail-label">Program</span><span class="detail-value">${escapeHtml(program?.name || 'N/A')}</span></div>
+      <div class="detail-group"><span class="detail-label">Year</span><span class="detail-value">${escapeHtml(course.yearNo)}</span></div>
+      <div class="detail-group"><span class="detail-label">Semester</span><span class="detail-value">${escapeHtml(course.semesterNo)}</span></div>
+      <div class="detail-group"><span class="detail-label">Credits</span><span class="detail-value">${escapeHtml(course.credits || 0)}</span></div>
+      <div class="detail-group"><span class="detail-label">Prerequisites</span><span class="detail-value">${prereqs.length ? prereqs.map((item) => escapeHtml(item.code)).join(', ') : 'None'}</span></div>
     </div>
   `;
   elements.viewHierarchyBtn.onclick = () => showHierarchyView(course.id);
@@ -480,9 +481,9 @@ function showHierarchyView(courseId) {
   elements.modalTitle.textContent = `Course Hierarchy - ${course.code}`;
   elements.modalBody.innerHTML = `
     <div class="hierarchy-view-boxes">
-      <div class="hierarchy-level"><h6>Prerequisites (${prerequisites.length})</h6><div class="hierarchy-row">${prerequisites.map((item) => hierarchyCard(item)).join('') || '<span class="no-prereq">None</span>'}</div></div>
+      <div class="hierarchy-level"><h6>Prerequisites (${escapeHtml(prerequisites.length)})</h6><div class="hierarchy-row">${prerequisites.map((item) => hierarchyCard(item)).join('') || '<span class="no-prereq">None</span>'}</div></div>
       <div class="hierarchy-center-wrapper">${hierarchyCard(course, true)}</div>
-      <div class="hierarchy-level"><h6>Required For (${dependents.length})</h6><div class="hierarchy-row">${dependents.map((item) => hierarchyCard(item)).join('') || '<span class="no-prereq">None</span>'}</div></div>
+      <div class="hierarchy-level"><h6>Required For (${escapeHtml(dependents.length)})</h6><div class="hierarchy-row">${dependents.map((item) => hierarchyCard(item)).join('') || '<span class="no-prereq">None</span>'}</div></div>
     </div>
   `;
   const hierarchyRoot = elements.modalBody.querySelector('.hierarchy-view-boxes');
@@ -503,9 +504,9 @@ function showHierarchyView(courseId) {
 }
 
 function hierarchyCard(course, current = false) {
-  return `<div class="hierarchy-card ${current ? 'current' : ''}" data-course-id="${course.id}" ${current ? '' : 'role="button" tabindex="0"'} aria-label="${current ? 'Current course' : 'Open related course'} ${course.code}">
-    <div class="hierarchy-card-header"><span class="hierarchy-card-code">${course.code}</span></div>
-    <div class="hierarchy-card-body"><h4 class="hierarchy-card-title">${course.name}</h4></div>
+  return `<div class="hierarchy-card ${current ? 'current' : ''}" data-course-id="${escapeHtml(course.id)}" ${current ? '' : 'role="button" tabindex="0"'} aria-label="${current ? 'Current course' : 'Open related course'} ${escapeHtml(course.code)}">
+    <div class="hierarchy-card-header"><span class="hierarchy-card-code">${escapeHtml(course.code)}</span></div>
+    <div class="hierarchy-card-body"><h4 class="hierarchy-card-title">${escapeHtml(course.name)}</h4></div>
   </div>`;
 }
 
@@ -526,7 +527,7 @@ function showRelatedCourseChoice(course) {
   sheet.innerHTML = `
     <div class="related-course-choice__panel">
       <p class="related-course-choice__eyebrow">Related course</p>
-      <h4 id="related-course-choice-title">${course.code} - ${course.name}</h4>
+      <h4 id="related-course-choice-title">${escapeHtml(course.code)} - ${escapeHtml(course.name)}</h4>
       <div class="related-course-choice__actions">
         <button class="gu-btn gu-btn--secondary" type="button" data-related-action="details">Open as course details</button>
         <button class="gu-btn gu-btn--primary" type="button" data-related-action="hierarchy">Open as hierarchy view</button>
