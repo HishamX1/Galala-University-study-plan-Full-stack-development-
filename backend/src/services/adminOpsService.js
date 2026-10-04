@@ -2,6 +2,8 @@ import { query, withPostgresClient } from '../db/client.js';
 import XLSX from 'xlsx';
 import { insertAuditLog, listAuditLogs } from '../repositories/auditRepository.js';
 import { findBackupSnapshot, insertBackup, listBackups } from '../repositories/backupRepository.js';
+import { insertImportedRow, readCatalogSnapshot, readImportReferences } from '../repositories/adminCatalogRepository.js';
+import { listDeletedCatalog } from '../repositories/recycleBinRepository.js';
 
 const ENTITY_TABLES = {
   faculty: 'faculties',
@@ -140,31 +142,7 @@ async function importRows({ type, format = 'json', content, fileContent }) {
 }
 
 async function catalogRows(client) {
-  const [faculties, programs, courses, relations] = await Promise.all([
-    client.query('SELECT id, name, created_at, updated_at FROM faculties WHERE deleted_at IS NULL ORDER BY name'),
-    client.query('SELECT id, faculty_id, name, duration_years, created_at, updated_at FROM programs WHERE deleted_at IS NULL ORDER BY name'),
-    client.query(
-      `SELECT pc.id, pc.program_id, p.faculty_id, pc.course_id, pc.code, c.name, pc.year_no, pc.semester_no,
-              pc.credits, pc.is_required, c.description, pc.created_at, pc.updated_at
-         FROM program_courses pc
-         JOIN programs p ON p.id = pc.program_id AND p.deleted_at IS NULL
-         JOIN courses c ON c.id = pc.course_id AND c.deleted_at IS NULL
-        WHERE pc.deleted_at IS NULL
-        ORDER BY pc.program_id, pc.year_no, pc.semester_no, pc.code`
-    ),
-    client.query(
-      `SELECT id, course_id, prerequisite_course_id, visible_to_students, created_at, updated_at
-         FROM course_prerequisites
-        WHERE deleted_at IS NULL
-        ORDER BY course_id, prerequisite_course_id`
-    )
-  ]);
-  return {
-    faculties: faculties.rows,
-    programs: programs.rows,
-    programCourses: courses.rows,
-    relationships: relations.rows
-  };
+  return readCatalogSnapshot(client);
 }
 
 export async function logAdminAction(client, { action, entity, entityId = null, oldValues = null, newValues = null, description = '', adminUser = 'Admin' }) {
@@ -279,26 +257,7 @@ export async function getSystemHealth() {
 }
 
 export async function getRecycleBin() {
-  const { rows } = await query(
-    `SELECT 'faculty' AS kind, id, name AS label, deleted_at, deleted_by, delete_reason,
-            (SELECT count(*)::int FROM programs p WHERE p.faculty_id = faculties.id) AS dependencies
-       FROM faculties WHERE deleted_at IS NOT NULL
-     UNION ALL
-     SELECT 'program', p.id, p.name, p.deleted_at, p.deleted_by, p.delete_reason,
-            (SELECT count(*)::int FROM program_courses pc WHERE pc.program_id = p.id) AS dependencies
-       FROM programs p WHERE p.deleted_at IS NOT NULL
-     UNION ALL
-     SELECT 'course', pc.id, pc.code || ' - ' || c.name, pc.deleted_at, pc.deleted_by, pc.delete_reason,
-            (SELECT count(*)::int FROM course_prerequisites cp WHERE cp.course_id = pc.id OR cp.prerequisite_course_id = pc.id) AS dependencies
-       FROM program_courses pc JOIN courses c ON c.id = pc.course_id WHERE pc.deleted_at IS NOT NULL
-     UNION ALL
-     SELECT 'relation', cp.id, cpc.code || ' requires ' || cpp.code, cp.deleted_at, cp.deleted_by, cp.delete_reason, 0
-       FROM course_prerequisites cp
-       JOIN program_courses cpc ON cpc.id = cp.course_id
-       JOIN program_courses cpp ON cpp.id = cp.prerequisite_course_id
-      WHERE cp.deleted_at IS NOT NULL
-      ORDER BY deleted_at DESC`
-  );
+  const { rows } = await listDeletedCatalog({ query });
   return rows.map((row) => ({ ...row, id: toInt(row.id), dependencies: Number(row.dependencies || 0) }));
 }
 
@@ -468,16 +427,7 @@ export async function validateImport({ type, format = 'json', content }) {
   const errors = [];
   const seenNames = new Set();
   const seenCodes = new Set();
-  const [faculties, programs, programCourses] = await Promise.all([
-    query('SELECT id, lower(name) AS name FROM faculties WHERE deleted_at IS NULL'),
-    query('SELECT id, faculty_id, lower(name) AS name FROM programs WHERE deleted_at IS NULL'),
-    query(
-      `SELECT pc.id, pc.program_id, lower(pc.code) AS code, lower(c.name) AS name
-         FROM program_courses pc
-         JOIN courses c ON c.id = pc.course_id AND c.deleted_at IS NULL
-        WHERE pc.deleted_at IS NULL`
-    )
-  ]);
+  const [faculties, programs, programCourses] = await readImportReferences({ query });
   const facultyIds = new Set(faculties.rows.map((row) => Number(row.id)));
   const programIds = new Set(programs.rows.map((row) => Number(row.id)));
   const courseIds = new Set(programCourses.rows.map((row) => Number(row.id)));
@@ -544,69 +494,8 @@ export async function importCatalog(payload) {
     try {
       let inserted = 0;
       for (const row of validation.rows) {
-        if (payload.type === 'faculties') {
-          await client.query('INSERT INTO faculties (name) VALUES ($1) ON CONFLICT DO NOTHING', [String(row.name).trim()]);
-          inserted += 1;
-        }
-        if (payload.type === 'programs') {
-          await client.query(
-            `INSERT INTO programs (faculty_id, name, duration_years)
-             VALUES ($1, $2, $3)
-             ON CONFLICT DO NOTHING`,
-            [Number(row.facultyId ?? row.faculty_id), String(row.name).trim(), Number(row.durationYears ?? row.duration_years)]
-          );
-          inserted += 1;
-        }
-        if (payload.type === 'programCourses') {
-          const course = await client.query(
-            `INSERT INTO courses (name, description)
-             VALUES ($1, $2)
-             ON CONFLICT (name) DO UPDATE SET description = COALESCE(EXCLUDED.description, courses.description), updated_at = now()
-             RETURNING id`,
-            [String(row.name).trim(), row.description || null]
-          );
-          const programCourse = await client.query(
-            `INSERT INTO program_courses (program_id, course_id, code, year_no, semester_no, is_required, credits)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
-             RETURNING id`,
-            [
-              Number(row.programId ?? row.program_id),
-              course.rows[0].id,
-              String(row.code).trim().toUpperCase(),
-              Number(row.yearNo ?? row.year_no),
-              Number(row.semesterNo ?? row.semester_no),
-              row.isRequired ?? row.is_required ?? true,
-              Number(row.credits ?? 0)
-            ]
-          );
-          const prerequisiteCodes = String(row.prerequisites || '').split(',').map((code) => code.trim().toLowerCase()).filter(Boolean);
-          for (const code of prerequisiteCodes) {
-            const prerequisite = await client.query(
-              `SELECT id FROM program_courses WHERE lower(code) = $1 AND deleted_at IS NULL LIMIT 1`,
-              [code]
-            );
-            if (prerequisite.rowCount) {
-              await client.query(
-                `INSERT INTO course_prerequisites (course_id, prerequisite_course_id)
-                 VALUES ($1, $2)
-                 ON CONFLICT DO NOTHING`,
-                [programCourse.rows[0].id, prerequisite.rows[0].id]
-              );
-            }
-          }
-          inserted += 1;
-        }
-        if (payload.type === 'relationships') {
-          const courseId = Number(row.courseId ?? row.course_id) || (await client.query('SELECT id FROM program_courses WHERE lower(code) = $1 AND deleted_at IS NULL LIMIT 1', [String(row.courseCode ?? row.course_code ?? '').trim().toLowerCase()])).rows[0]?.id;
-          const prerequisiteCourseId = Number(row.prerequisiteCourseId ?? row.prerequisite_course_id) || (await client.query('SELECT id FROM program_courses WHERE lower(code) = $1 AND deleted_at IS NULL LIMIT 1', [String(row.prerequisiteCode ?? row.prerequisite_code ?? '').trim().toLowerCase()])).rows[0]?.id;
-          await client.query(
-            `INSERT INTO course_prerequisites (course_id, prerequisite_course_id, visible_to_students)
-             VALUES ($1, $2, $3)
-             ON CONFLICT DO NOTHING`,
-            [courseId, prerequisiteCourseId, row.visibleToStudents ?? row.visible_to_students ?? true]
-          );
-          inserted += 1;
-        }
+        await insertImportedRow(client, payload.type, row);
+        inserted += 1;
       }
       await logAdminAction(client, {
         action: `Imported ${payload.type}`,
