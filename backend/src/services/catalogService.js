@@ -1,5 +1,10 @@
 import { query, withPostgresClient } from '../db/client.js';
 import { logAdminAction } from './adminOpsService.js';
+import { findActiveFaculty, insertFaculty, listActiveFaculties, listActiveFacultyProgramCourseIds, softDeleteFaculty, updateActiveFaculty } from '../repositories/facultyRepository.js';
+import { findActiveProgram, insertProgram, listActivePrograms, softDeleteProgram, softDeleteProgramsForFaculty, updateActiveProgram } from '../repositories/programRepository.js';
+import { findActiveProgramCourseDetail, findActiveProgramCourseSummary, findDuplicateProgramCourse, findProgramCourseWithCourse, insertProgramCourse, listActiveProgramCourseSummaries, listActiveProgramCourses, programCourseExists, programCourseRecordExists, softDeleteProgramCourse, softDeleteProgramCourses, updateProgramCourseRow } from '../repositories/programCourseRepository.js';
+import { updateCourse, upsertCourse } from '../repositories/courseRepository.js';
+import { createPrerequisiteRow, listActivePrerequisiteRows, listRelationshipImpactRows, replacePrerequisiteRows, softDeletePrerequisiteRow, softDeletePrerequisitesForCourses, updatePrerequisiteVisibilityRow } from '../repositories/prerequisiteRepository.js';
 
 function duplicate(error) {
   return String(error?.code) === '23505';
@@ -56,16 +61,7 @@ function mapProgramCourse(row, prerequisiteRelations = []) {
 
 async function prerequisiteMap(ids, client = null, { includeHidden = false } = {}) {
   if (!ids.length) return new Map();
-  const exec = client ? client.query.bind(client) : query;
-  const { rows } = await exec(
-    `SELECT id, course_id, prerequisite_course_id, visible_to_students
-       FROM course_prerequisites
-      WHERE course_id = ANY($1::bigint[])
-        AND ($2::boolean = true OR visible_to_students = true)
-        AND deleted_at IS NULL
-      ORDER BY course_id, prerequisite_course_id`,
-    [ids, includeHidden]
-  );
+  const rows = await listActivePrerequisiteRows(ids, includeHidden, client || { query });
   const map = new Map();
   for (const row of rows) {
     const courseId = toInt(row.course_id);
@@ -77,21 +73,7 @@ async function prerequisiteMap(ids, client = null, { includeHidden = false } = {
 
 async function getRelationshipImpactForProgramCourses(client, ids) {
   if (!ids.length) return { prerequisiteLinks: [], requiredForLinks: [] };
-  const { rows } = await client.query(
-    `SELECT cp.id, cp.course_id, cp.prerequisite_course_id, cp.visible_to_students,
-            cpc.code AS course_code, cc.name AS course_name,
-            cpp.code AS prerequisite_code, pc.name AS prerequisite_name
-       FROM course_prerequisites cp
-       JOIN program_courses cpc ON cpc.id = cp.course_id
-       JOIN courses cc ON cc.id = cpc.course_id
-       JOIN program_courses cpp ON cpp.id = cp.prerequisite_course_id
-       JOIN courses pc ON pc.id = cpp.course_id
-      WHERE (cp.course_id = ANY($1::bigint[])
-         OR cp.prerequisite_course_id = ANY($1::bigint[]))
-        AND cp.deleted_at IS NULL
-      ORDER BY cpc.code, cpp.code`,
-    [ids]
-  );
+  const rows = await listRelationshipImpactRows(ids, client);
   const prerequisiteLinks = [];
   const requiredForLinks = [];
   for (const row of rows) {
@@ -112,35 +94,22 @@ async function getRelationshipImpactForProgramCourses(client, ids) {
 }
 
 async function getProgramCourseById(id, client = null) {
-  const exec = client ? client.query.bind(client) : query;
-  const { rows } = await exec(
-    `SELECT pc.id, pc.program_id, p.faculty_id, pc.course_id, c.name, pc.code,
-            pc.year_no, pc.semester_no, pc.credits, pc.is_required, c.description
-       FROM program_courses pc
-       JOIN courses c ON c.id = pc.course_id
-       JOIN programs p ON p.id = pc.program_id
-      WHERE pc.id = $1
-        AND pc.deleted_at IS NULL
-        AND p.deleted_at IS NULL
-        AND c.deleted_at IS NULL
-      LIMIT 1`,
-    [id]
-  );
+  const rows = await findActiveProgramCourseDetail(id, client || { query });
   if (!rows.length) return null;
   const prereqs = await prerequisiteMap([id], client, { includeHidden: true });
   return mapProgramCourse(rows[0], prereqs.get(toInt(id)) || []);
 }
 
 export async function getFaculties() {
-  const { rows } = await query('SELECT id, name FROM faculties WHERE deleted_at IS NULL ORDER BY name');
+  const rows = await listActiveFaculties();
   return rows.map(mapFaculty);
 }
 
 export async function createFaculty(data) {
   try {
-    const { rows } = await query('INSERT INTO faculties (name) VALUES ($1) RETURNING id, name', [data.name.trim()]);
-    await logAdminAction(null, { action: 'Created Faculty', entity: 'faculty', entityId: rows[0].id, newValues: rows[0], description: `Created faculty ${rows[0].name}` });
-    return mapFaculty(rows[0]);
+    const created = await insertFaculty(data.name.trim(), { query });
+    await logAdminAction(null, { action: 'Created Faculty', entity: 'faculty', entityId: created.id, newValues: created, description: `Created faculty ${created.name}` });
+    return mapFaculty(created);
   } catch (error) {
     if (duplicate(error)) return null;
     throw error;
@@ -152,15 +121,12 @@ export async function updateFaculty(id, data) {
     return await withPostgresClient(async (client) => {
       await client.query('BEGIN');
       try {
-        const current = await client.query('SELECT id, name FROM faculties WHERE id = $1 AND deleted_at IS NULL', [id]);
+        const current = await findActiveFaculty(id, client);
         if (!current.rowCount) {
           await client.query('ROLLBACK');
           return false;
         }
-        const { rows, rowCount } = await client.query(
-          'UPDATE faculties SET name = COALESCE($2, name), updated_at = now() WHERE id = $1 RETURNING id, name',
-          [id, data.name?.trim()]
-        );
+        const { rows, rowCount } = await updateActiveFaculty(id, data.name?.trim(), client);
         if (!rowCount) {
           await client.query('ROLLBACK');
           return false;
@@ -183,38 +149,18 @@ export async function deleteFaculty(id) {
   return withPostgresClient(async (client) => {
     await client.query('BEGIN');
     try {
-      const current = await client.query('SELECT id, name FROM faculties WHERE id = $1 AND deleted_at IS NULL', [id]);
+      const current = await findActiveFaculty(id, client);
       if (!current.rowCount) {
         await client.query('ROLLBACK');
         return false;
       }
-      const childCourses = await client.query(
-        `SELECT pc.id
-           FROM program_courses pc
-           JOIN programs p ON p.id = pc.program_id
-          WHERE p.faculty_id = $1
-            AND pc.deleted_at IS NULL`,
-        [id]
-      );
-      const childCourseIds = childCourses.rows.map((row) => toInt(row.id));
+      const childCourseIds = (await listActiveFacultyProgramCourseIds(id, client)).map((row) => toInt(row.id));
       if (childCourseIds.length) {
-        await client.query(
-          "UPDATE course_prerequisites SET deleted_at = now(), deleted_by = 'Admin', delete_reason = 'Parent faculty deleted', updated_at = now() WHERE course_id = ANY($1::bigint[]) OR prerequisite_course_id = ANY($1::bigint[])",
-          [childCourseIds]
-        );
-        await client.query(
-          "UPDATE program_courses SET deleted_at = now(), deleted_by = 'Admin', delete_reason = 'Parent faculty deleted', updated_at = now() WHERE id = ANY($1::bigint[])",
-          [childCourseIds]
-        );
+        await softDeletePrerequisitesForCourses(childCourseIds, 'Parent faculty deleted', client);
+        await softDeleteProgramCourses(childCourseIds, 'Parent faculty deleted', client);
       }
-      await client.query(
-        "UPDATE programs SET deleted_at = now(), deleted_by = 'Admin', delete_reason = 'Parent faculty deleted', updated_at = now() WHERE faculty_id = $1 AND deleted_at IS NULL",
-        [id]
-      );
-      const { rowCount } = await client.query(
-        "UPDATE faculties SET deleted_at = now(), deleted_by = 'Admin', delete_reason = 'Admin delete', updated_at = now() WHERE id = $1",
-        [id]
-      );
+      await softDeleteProgramsForFaculty(id, client);
+      const { rowCount } = await softDeleteFaculty(id, client);
       await logAdminAction(client, { action: 'Deleted Faculty', entity: 'faculty', entityId: id, oldValues: current.rows[0], description: `Moved faculty ${current.rows[0].name} to recycle bin` });
       await client.query('COMMIT');
       return rowCount > 0;
@@ -226,28 +172,15 @@ export async function deleteFaculty(id) {
 }
 
 export async function getPrograms(facultyId) {
-  const { rows } = await query(
-    `SELECT p.id, p.faculty_id, p.name, p.duration_years
-       FROM programs p
-       JOIN faculties f ON f.id = p.faculty_id AND f.deleted_at IS NULL
-      WHERE ($1::bigint IS NULL OR p.faculty_id = $1)
-        AND p.deleted_at IS NULL
-      ORDER BY p.name`,
-    [facultyId || null]
-  );
+  const rows = await listActivePrograms(facultyId, { query });
   return rows.map(mapProgram);
 }
 
 export async function createProgram(data) {
   try {
-    const { rows } = await query(
-      `INSERT INTO programs (faculty_id, name, duration_years)
-       VALUES ($1, $2, $3)
-       RETURNING id, faculty_id, name, duration_years`,
-      [data.facultyId, data.name.trim(), data.durationYears]
-    );
-    await logAdminAction(null, { action: 'Created Program', entity: 'program', entityId: rows[0].id, newValues: rows[0], description: `Created program ${rows[0].name}` });
-    return mapProgram(rows[0]);
+    const created = await insertProgram(data, { query });
+    await logAdminAction(null, { action: 'Created Program', entity: 'program', entityId: created.id, newValues: created, description: `Created program ${created.name}` });
+    return mapProgram(created);
   } catch (error) {
     if (duplicate(error)) return null;
     throw error;
@@ -256,16 +189,7 @@ export async function createProgram(data) {
 
 export async function updateProgram(id, data) {
   try {
-    const { rows, rowCount } = await query(
-      `UPDATE programs
-          SET faculty_id = COALESCE($2, faculty_id),
-              name = COALESCE($3, name),
-              duration_years = COALESCE($4, duration_years)
-        WHERE id = $1
-          AND deleted_at IS NULL
-        RETURNING id, faculty_id, name, duration_years`,
-      [id, data.facultyId, data.name?.trim(), data.durationYears]
-    );
+    const { rows, rowCount } = await updateActiveProgram(id, data, { query });
     if (!rowCount) return false;
     await logAdminAction(null, { action: 'Updated Program', entity: 'program', entityId: id, newValues: rows[0], description: `Updated program ${rows[0].name}` });
     return mapProgram(rows[0]);
@@ -277,17 +201,9 @@ export async function updateProgram(id, data) {
 
 export async function getProgramDeleteImpact(id) {
   return withPostgresClient(async (client) => {
-    const program = await client.query('SELECT id, name FROM programs WHERE id = $1 AND deleted_at IS NULL', [id]);
+    const program = await findActiveProgram(id, client);
     if (!program.rowCount) return null;
-    const courses = await client.query(
-      `SELECT pc.id, pc.course_id, pc.code, c.name
-         FROM program_courses pc
-         JOIN courses c ON c.id = pc.course_id
-        WHERE pc.program_id = $1
-          AND pc.deleted_at IS NULL
-        ORDER BY pc.code`,
-      [id]
-    );
+    const courses = await listActiveProgramCourseSummaries(id, client);
     const ids = courses.rows.map((row) => toInt(row.id));
     const relations = await getRelationshipImpactForProgramCourses(client, ids);
     return {
@@ -304,21 +220,18 @@ export async function deleteProgram(id) {
   return withPostgresClient(async (client) => {
     await client.query('BEGIN');
     try {
-      const current = await client.query('SELECT id, name FROM programs WHERE id = $1 AND deleted_at IS NULL', [id]);
+      const current = await findActiveProgram(id, client);
       if (!current.rowCount) {
         await client.query('ROLLBACK');
         return false;
       }
-      const programCourses = await client.query('SELECT id, course_id FROM program_courses WHERE program_id = $1 AND deleted_at IS NULL', [id]);
+      const programCourses = await listActiveProgramCourseSummaries(id, client);
       const programCourseIds = programCourses.rows.map((row) => toInt(row.id));
       if (programCourseIds.length) {
-        await client.query(
-          "UPDATE course_prerequisites SET deleted_at = now(), deleted_by = 'Admin', delete_reason = 'Parent program deleted', updated_at = now() WHERE course_id = ANY($1::bigint[]) OR prerequisite_course_id = ANY($1::bigint[])",
-          [programCourseIds]
-        );
-        await client.query("UPDATE program_courses SET deleted_at = now(), deleted_by = 'Admin', delete_reason = 'Parent program deleted', updated_at = now() WHERE id = ANY($1::bigint[])", [programCourseIds]);
+        await softDeletePrerequisitesForCourses(programCourseIds, 'Parent program deleted', client);
+        await softDeleteProgramCourses(programCourseIds, 'Parent program deleted', client);
       }
-      const { rowCount } = await client.query("UPDATE programs SET deleted_at = now(), deleted_by = 'Admin', delete_reason = 'Admin delete', updated_at = now() WHERE id = $1", [id]);
+      const { rowCount } = await softDeleteProgram(id, client);
       await logAdminAction(client, { action: 'Deleted Program', entity: 'program', entityId: id, oldValues: current.rows[0], description: `Moved program ${current.rows[0].name} to recycle bin` });
       await client.query('COMMIT');
       return rowCount > 0;
@@ -330,39 +243,7 @@ export async function deleteProgram(id) {
 }
 
 export async function getProgramCourses(filters = {}, options = {}) {
-  const params = [];
-  const conditions = [];
-
-  if (filters.facultyId != null) {
-    params.push(filters.facultyId);
-    conditions.push(`p.faculty_id = $${params.length}`);
-  }
-  if (filters.programId != null) {
-    params.push(filters.programId);
-    conditions.push(`pc.program_id = $${params.length}`);
-  }
-  if (filters.yearNo != null) {
-    params.push(filters.yearNo);
-    conditions.push(`pc.year_no = $${params.length}`);
-  }
-  if (filters.semesterNo != null) {
-    params.push(filters.semesterNo);
-    conditions.push(`pc.semester_no = $${params.length}`);
-  }
-
-  const { rows } = await query(
-    `SELECT pc.id, pc.program_id, p.faculty_id, pc.course_id, c.name, pc.code,
-            pc.year_no, pc.semester_no, pc.credits, pc.is_required, c.description
-      FROM program_courses pc
-      JOIN courses c ON c.id = pc.course_id
-      JOIN programs p ON p.id = pc.program_id
-      WHERE pc.deleted_at IS NULL
-        AND c.deleted_at IS NULL
-        AND p.deleted_at IS NULL
-        ${conditions.length ? `AND ${conditions.join(' AND ')}` : ''}
-      ORDER BY pc.program_id, pc.year_no, pc.semester_no, pc.code`,
-    params
-  );
+  const rows = await listActiveProgramCourses(filters, { query });
   const prereqs = await prerequisiteMap(rows.map((row) => row.id), null, options);
   return rows.map((row) => mapProgramCourse(row, prereqs.get(toInt(row.id)) || []));
 }
@@ -372,40 +253,18 @@ export async function createProgramCourse(data) {
     return await withPostgresClient(async (client) => {
       await client.query('BEGIN');
       try {
-        const duplicateCourse = await client.query(
-          `SELECT 1
-             FROM program_courses pc
-             JOIN courses c ON c.id = pc.course_id
-            WHERE pc.deleted_at IS NULL
-              AND (lower(pc.code) = lower($1)
-               OR lower(c.name) = lower($2))
-            LIMIT 1`,
-          [data.code.trim(), data.name.trim()]
-        );
+        const duplicateCourse = await findDuplicateProgramCourse(data.code.trim(), data.name.trim(), null, client);
         if (duplicateCourse.rowCount) {
           await client.query('ROLLBACK');
           return null;
         }
 
-        const course = await client.query(
-          `INSERT INTO courses (name, description)
-           VALUES ($1, $2)
-           ON CONFLICT (name)
-           DO UPDATE SET description = COALESCE(EXCLUDED.description, courses.description)
-           RETURNING id`,
-          [data.name.trim(), cleanText(data.description)]
-        );
-        const courseId = course.rows[0].id;
-        const programCourse = await client.query(
-          `INSERT INTO program_courses (program_id, course_id, code, year_no, semester_no, is_required, credits)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
-           RETURNING id`,
-          [data.programId, courseId, data.code.trim(), data.yearNo, data.semesterNo, data.isRequired ?? true, data.credits]
-        );
-        await replacePrerequisites(client, programCourse.rows[0].id, data.prerequisiteCourseIds || []);
-        await logAdminAction(client, { action: 'Created Course', entity: 'course', entityId: programCourse.rows[0].id, newValues: { ...data, id: programCourse.rows[0].id }, description: `Created course ${data.code.trim().toUpperCase()}` });
+        const courseId = (await upsertCourse(data.name.trim(), cleanText(data.description), client)).id;
+        const programCourse = await insertProgramCourse(data, courseId, client);
+        await replacePrerequisites(client, programCourse.id, data.prerequisiteCourseIds || []);
+        await logAdminAction(client, { action: 'Created Course', entity: 'course', entityId: programCourse.id, newValues: { ...data, id: programCourse.id }, description: `Created course ${data.code.trim().toUpperCase()}` });
         await client.query('COMMIT');
-        return getProgramCourseById(programCourse.rows[0].id);
+        return getProgramCourseById(programCourse.id);
       } catch (error) {
         await client.query('ROLLBACK').catch(() => {});
         throw error;
@@ -422,32 +281,14 @@ export async function updateProgramCourse(id, data) {
     return await withPostgresClient(async (client) => {
       await client.query('BEGIN');
       try {
-        const current = await client.query(
-          `SELECT pc.*, c.name, c.description
-             FROM program_courses pc
-             JOIN courses c ON c.id = pc.course_id
-            WHERE pc.id = $1 AND pc.deleted_at IS NULL`,
-          [id]
-        );
+        const current = await findProgramCourseWithCourse(id, client);
         if (!current.rowCount) {
           await client.query('ROLLBACK');
           return false;
         }
 
         if (data.code !== undefined || data.name !== undefined) {
-          const duplicateCourse = await client.query(
-            `SELECT 1
-               FROM program_courses pc
-               JOIN courses c ON c.id = pc.course_id
-              WHERE pc.id <> $1
-                AND pc.deleted_at IS NULL
-                AND (
-                  ($2::text IS NOT NULL AND lower(pc.code) = lower($2))
-                  OR ($3::text IS NOT NULL AND lower(c.name) = lower($3))
-                )
-              LIMIT 1`,
-            [id, data.code?.trim() ?? null, data.name?.trim() ?? null]
-          );
+          const duplicateCourse = await findDuplicateProgramCourse(data.code?.trim() ?? null, data.name?.trim() ?? null, id, client);
           if (duplicateCourse.rowCount) {
             await client.query('ROLLBACK');
             return null;
@@ -455,26 +296,10 @@ export async function updateProgramCourse(id, data) {
         }
 
         if (data.name !== undefined || data.description !== undefined) {
-          await client.query(
-            `UPDATE courses
-                SET name = COALESCE($2, name),
-                    description = COALESCE($3, description)
-              WHERE id = $1`,
-            [current.rows[0].course_id, data.name?.trim(), cleanText(data.description)]
-          );
+          await updateCourse(current.rows[0].course_id, data.name?.trim(), cleanText(data.description), client);
         }
 
-        await client.query(
-          `UPDATE program_courses
-              SET program_id = COALESCE($2, program_id),
-                  code = COALESCE($3, code),
-                  year_no = COALESCE($4, year_no),
-                  semester_no = COALESCE($5, semester_no),
-                  is_required = COALESCE($6, is_required),
-                  credits = COALESCE($7, credits)
-            WHERE id = $1`,
-          [id, data.programId, data.code?.trim(), data.yearNo, data.semesterNo, data.isRequired, data.credits]
-        );
+        await updateProgramCourseRow(id, data, client);
 
         if (Array.isArray(data.prerequisiteCourseIds)) {
           await replacePrerequisites(client, id, data.prerequisiteCourseIds);
@@ -496,33 +321,15 @@ export async function updateProgramCourse(id, data) {
 
 async function replacePrerequisites(client, courseId, prerequisiteCourseIds) {
   const ids = [...new Set(prerequisiteCourseIds.map(Number).filter((id) => id !== Number(courseId)))];
-  if (ids.length) {
-    await client.query('DELETE FROM course_prerequisites WHERE course_id = $1 AND NOT (prerequisite_course_id = ANY($2::bigint[]))', [courseId, ids]);
-  } else {
-    await client.query('DELETE FROM course_prerequisites WHERE course_id = $1', [courseId]);
-  }
+  await replacePrerequisiteRows(courseId, ids, client);
   for (const prerequisiteCourseId of ids) {
-    const exists = await client.query('SELECT 1 FROM program_courses WHERE id = $1', [prerequisiteCourseId]);
-    if (!exists.rowCount) throw new Error('FK_PROGRAM_COURSE');
-    await client.query(
-      `INSERT INTO course_prerequisites (course_id, prerequisite_course_id)
-       VALUES ($1, $2)
-       ON CONFLICT DO NOTHING`,
-      [courseId, prerequisiteCourseId]
-    );
+    if (!(await programCourseRecordExists(prerequisiteCourseId, client))) throw new Error('FK_PROGRAM_COURSE');
   }
 }
 
 export async function getProgramCourseDeleteImpact(id) {
   return withPostgresClient(async (client) => {
-    const current = await client.query(
-      `SELECT pc.id, pc.course_id, pc.code, c.name
-         FROM program_courses pc
-         JOIN courses c ON c.id = pc.course_id
-        WHERE pc.id = $1
-          AND pc.deleted_at IS NULL`,
-      [id]
-    );
+    const current = await findActiveProgramCourseSummary(id, client);
     if (!current.rowCount) return null;
     const relations = await getRelationshipImpactForProgramCourses(client, [id]);
     return {
@@ -542,19 +349,13 @@ export async function deleteProgramCourse(id) {
   return withPostgresClient(async (client) => {
     await client.query('BEGIN');
     try {
-      const current = await client.query(
-        `SELECT pc.id, pc.course_id, pc.code, c.name
-           FROM program_courses pc
-           JOIN courses c ON c.id = pc.course_id
-          WHERE pc.id = $1 AND pc.deleted_at IS NULL`,
-        [id]
-      );
+      const current = await findActiveProgramCourseSummary(id, client);
       if (!current.rowCount) {
         await client.query('ROLLBACK');
         return false;
       }
-      await client.query("UPDATE course_prerequisites SET deleted_at = now(), deleted_by = 'Admin', delete_reason = 'Related course deleted', updated_at = now() WHERE course_id = $1 OR prerequisite_course_id = $1", [id]);
-      const { rowCount } = await client.query("UPDATE program_courses SET deleted_at = now(), deleted_by = 'Admin', delete_reason = 'Admin delete', updated_at = now() WHERE id = $1", [id]);
+      await softDeletePrerequisitesForCourses([id], 'Related course deleted', client);
+      const { rowCount } = await softDeleteProgramCourse(id, client);
       await logAdminAction(client, { action: 'Deleted Course', entity: 'course', entityId: id, oldValues: current.rows[0], description: `Moved course ${current.rows[0].code} to recycle bin` });
       await client.query('COMMIT');
       return rowCount > 0;
@@ -574,8 +375,7 @@ export async function updatePrerequisites(programCourseId, prerequisiteCourseIds
   await withPostgresClient(async (client) => {
     await client.query('BEGIN');
     try {
-      const exists = await client.query('SELECT 1 FROM program_courses WHERE id = $1 AND deleted_at IS NULL', [programCourseId]);
-      if (!exists.rowCount) {
+      if (!(await programCourseExists(programCourseId, client))) {
         await client.query('ROLLBACK');
         return false;
       }
@@ -593,12 +393,7 @@ export async function updatePrerequisites(programCourseId, prerequisiteCourseIds
 export async function addPrerequisiteRelation(programCourseId, prerequisiteCourseId) {
   if (Number(programCourseId) === Number(prerequisiteCourseId)) throw new Error('FK_SELF_RELATION');
   try {
-    const { rows } = await query(
-      `INSERT INTO course_prerequisites (course_id, prerequisite_course_id)
-       VALUES ($1, $2)
-       RETURNING id, course_id, prerequisite_course_id, visible_to_students`,
-      [programCourseId, prerequisiteCourseId]
-    );
+    const rows = [await createPrerequisiteRow(programCourseId, prerequisiteCourseId, { query })];
     await logAdminAction(null, { action: 'Created Relation', entity: 'relation', entityId: rows[0].id, newValues: rows[0], description: 'Created prerequisite relationship' });
     return mapPrerequisiteRelation(rows[0]);
   } catch (error) {
@@ -609,33 +404,13 @@ export async function addPrerequisiteRelation(programCourseId, prerequisiteCours
 }
 
 export async function deletePrerequisiteRelation(programCourseId, prerequisiteCourseId) {
-  const { rows, rowCount } = await query(
-    `UPDATE course_prerequisites
-        SET deleted_at = now(),
-            deleted_by = 'Admin',
-            delete_reason = 'Admin delete',
-            updated_at = now()
-      WHERE course_id = $1
-        AND prerequisite_course_id = $2
-        AND deleted_at IS NULL
-      RETURNING id, course_id, prerequisite_course_id, visible_to_students`,
-    [programCourseId, prerequisiteCourseId]
-  );
+  const { rows, rowCount } = await softDeletePrerequisiteRow(programCourseId, prerequisiteCourseId, { query });
   if (rowCount) await logAdminAction(null, { action: 'Deleted Relation', entity: 'relation', entityId: rows[0].id, oldValues: rows[0], description: 'Moved prerequisite relationship to recycle bin' });
   return rowCount > 0;
 }
 
 export async function updatePrerequisiteVisibility(programCourseId, prerequisiteCourseId, visibleToStudents) {
-  const { rows, rowCount } = await query(
-    `UPDATE course_prerequisites
-        SET visible_to_students = $3,
-            updated_at = now()
-      WHERE course_id = $1
-        AND prerequisite_course_id = $2
-        AND deleted_at IS NULL
-      RETURNING id, course_id, prerequisite_course_id, visible_to_students`,
-    [programCourseId, prerequisiteCourseId, visibleToStudents]
-  );
+  const { rows, rowCount } = await updatePrerequisiteVisibilityRow(programCourseId, prerequisiteCourseId, visibleToStudents, { query });
   if (rowCount) await logAdminAction(null, { action: visibleToStudents ? 'Restored Relation Visibility' : 'Hidden Relation', entity: 'relation', entityId: rows[0].id, newValues: rows[0], description: `Relation ${visibleToStudents ? 'shown to' : 'hidden from'} students` });
   return rowCount > 0;
 }

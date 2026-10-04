@@ -48,8 +48,14 @@ import {
 } from '../validation/schemas.js';
 import { env } from '../config/env.js';
 import { databaseDiagnosticMessage } from '../db/client.js';
-import { authenticate, authCookies, clearAuthCookies, createSession, createUser, currentUser, deleteUser, listUsers, logout, publicUser, refreshSession, resetUserPassword, updateUser, countSuperAdmins, createPasswordResetRequest, listPasswordResetRequests, decidePasswordResetRequest, consumePasswordResetToken, createComplaint, listComplaints, updateComplaint, createCommunication, listCommunications, getDashboardData, updateOwnProfile } from '../services/authService.js';
+import { currentUser, createUser, deleteUser, listUsers, resetUserPassword, updateUser, countSuperAdmins, listPasswordResetRequests, decidePasswordResetRequest, createComplaint, listComplaints, updateComplaint, createCommunication, listCommunications, getDashboardData, updateOwnProfile } from '../services/authService.js';
 import { validatePassword } from '../services/passwordService.js';
+import { Permissions, hasPermission } from '../security/permissions.js';
+import { allowRequest } from '../security/rateLimiter.js';
+import { toErrorResponse } from '../utils/errors.js';
+import { download, json, parseBody } from '../middleware/http.js';
+import { handleAuthRequest } from '../controllers/authController.js';
+import { handleCatalogDelete, handleCatalogReadRequest, handleCatalogUpdate } from '../controllers/catalogController.js';
 
 function isAllowedCorsOrigin(origin) {
   return Boolean(origin) && env.corsOrigins.includes(origin);
@@ -67,53 +73,31 @@ function applyCorsHeaders(req, res) {
   return true;
 }
 
-function json(res, status, data, extraHeaders = {}) {
-  res.writeHead(status, {
-    'Content-Type': 'application/json',
-    ...extraHeaders
-  });
-  res.end(JSON.stringify(data));
-}
-
 function unauthorized(res) { return json(res, 401, { error: 'Authentication required' }); }
 function forbidden(res) { return json(res, 403, { error: 'You do not have permission to access this resource' }); }
+function requirePermission(res, user, permission) { return hasPermission(user, permission) || forbidden(res); }
 function canAccess(user, req, pathname) {
   if (!user) return false;
-  if (user.role === 'super_admin') return true;
   const isRead = req.method === 'GET';
   const curriculum = pathname === `${env.apiBasePath}/catalog` || pathname.startsWith(`${env.apiBasePath}/faculties`) || pathname.startsWith(`${env.apiBasePath}/programs`) || pathname.startsWith(`${env.apiBasePath}/program-courses`);
   const studentCatalog = pathname === `${env.apiBasePath}/catalog` || pathname === `${env.apiBasePath}/faculties` || pathname === `${env.apiBasePath}/programs` || pathname === `${env.apiBasePath}/program-courses` || new RegExp(`^${env.apiBasePath}/program-courses/\\d+/prerequisites$`).test(pathname);
-  if (user.role === 'student') return isRead && studentCatalog && !new URL(req.url, 'http://localhost').searchParams.has('audience');
+  if (user.role === 'student') return hasPermission(user, Permissions.catalogRead) && isRead && studentCatalog && !new URL(req.url, 'http://localhost').searchParams.has('audience');
   // Regular administrators may operate the curriculum portal, but never the
   // super-admin account/request endpoints.  The old narrow allowlist made a
   // successful admin login look like a failed session during portal bootstrap.
-  if (user.role === 'regular_admin') return curriculum || pathname.startsWith(`${env.apiBasePath}/admin/`);
-  return false;
+  // More-sensitive admin endpoints are rejected above this compatibility gate.
+  // The remaining legacy curriculum operations stay available to regular admins.
+  if (pathname.startsWith(`${env.apiBasePath}/admin/`)) return hasPermission(user, Permissions.catalogWrite);
+  return curriculum && hasPermission(user, isRead ? Permissions.catalogRead : Permissions.catalogWrite);
 }
 
-function download(res, payload) {
-  res.writeHead(200, {
-    'Content-Type': payload.mimeType,
-    'Content-Disposition': `attachment; filename="${payload.filename.replaceAll('"', '')}"`,
-    'Cache-Control': 'no-store',
-  });
-  res.end(payload.content);
-}
-
-async function parseBody(req) {
-  const chunks = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += chunk.length;
-    if (size > 12 * 1024 * 1024) throw new Error('PAYLOAD_TOO_LARGE');
-    chunks.push(chunk);
-  }
-  const raw = Buffer.concat(chunks).toString('utf8') || '{}';
-  try {
-    return JSON.parse(raw);
-  } catch {
-    throw new Error('INVALID_JSON');
-  }
+function isStateChanging(method) { return ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method); }
+function hasSessionCookie(req) { return /(?:^|;\s*)gu_(?:access|refresh)=/.test(String(req.headers.cookie || '')); }
+function trustedStateChange(req) {
+  // Cookie-authenticated mutations require an explicit approved Origin. This
+  // preserves credentialed Netlify/Render requests while rejecting blind CSRF.
+  if (!isStateChanging(req.method) || !hasSessionCookie(req)) return true;
+  return isAllowedCorsOrigin(req.headers.origin);
 }
 
 function toNumber(value) {
@@ -126,26 +110,6 @@ function idFromPath(pathname) {
   return toNumber(pathname.split('/').filter(Boolean).at(-1));
 }
 
-async function handleUpdate(req, res, validator, updater, id, label) {
-  const idErr = validateEntityId(id, `${label} id`);
-  if (idErr) return json(res, 400, { error: idErr });
-  const body = await parseBody(req);
-  const err = validator(body);
-  if (err) return json(res, 400, { error: err });
-  const updated = await updater(id, body);
-  if (updated === false) return json(res, 404, { error: `${label} not found` });
-  if (!updated) return json(res, 409, { error: label === 'Program course' ? 'This course already exists.' : `${label} already exists` });
-  return json(res, 200, updated);
-}
-
-async function handleDelete(res, deleter, id, label) {
-  const idErr = validateEntityId(id, `${label} id`);
-  if (idErr) return json(res, 400, { error: idErr });
-  const deleted = await deleter(id);
-  if (!deleted) return json(res, 404, { error: `${label} not found` });
-  return json(res, 200, { deleted: true, id });
-}
-
 export async function handleApi(req, res, url) {
   if (!url.pathname.startsWith(env.apiBasePath)) return false;
   const origin = req.headers.origin;
@@ -153,72 +117,42 @@ export async function handleApi(req, res, url) {
     return json(res, 403, { error: 'Origin is not allowed' });
   }
   if (req.method === 'OPTIONS') return json(res, 204, {});
+  if (!trustedStateChange(req)) return json(res, 403, { error: 'Origin validation failed' });
+
+  const authSensitive = [`${env.apiBasePath}/auth/login`, `${env.apiBasePath}/auth/student-login`, `${env.apiBasePath}/auth/admin-login`, `${env.apiBasePath}/auth/password-reset-requests`];
+  if (req.method === 'POST' && authSensitive.includes(url.pathname)) {
+    const client = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
+    if (!allowRequest(`${url.pathname}:${client}`, { limit: 10, windowMs: 60_000 })) return json(res, 429, { error: 'Too many requests. Please try again shortly.' }, { 'Retry-After': '60' });
+  }
 
   try {
-    if (req.method === 'POST' && [
-      `${env.apiBasePath}/auth/login`, `${env.apiBasePath}/auth/student-login`, `${env.apiBasePath}/auth/admin-login`
-    ].includes(url.pathname)) {
-      const body = await parseBody(req);
-      if (!body.identifier || !body.password) return json(res, 400, { error: 'Identifier and password are required' });
-      const user = await authenticate(String(body.identifier), String(body.password));
-      if (!user) return json(res, 401, { error: 'Invalid credentials or inactive account' });
-      if (url.pathname.endsWith('/student-login') && user.role !== 'student') return json(res, 403, { error: 'This account belongs to the administrator portal.' });
-      if (url.pathname.endsWith('/admin-login') && !['regular_admin', 'super_admin'].includes(user.role)) return json(res, 403, { error: 'Student accounts must use the Student Portal.' });
-      const session = await createSession(user);
-      return json(res, 200, { user: publicUser(user) }, { 'Set-Cookie': authCookies(session.accessToken, session.refreshToken, session.refreshTtlSeconds) });
-    }
-    if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/auth/student-signup`) {
-      const body = await parseBody(req);
-      if (!body.name || !body.email || !body.password || !body.confirmPassword) return json(res, 400, { error: 'Full name, email, password, and confirmation are required.' });
-      if (body.password !== body.confirmPassword) return json(res, 400, { error: 'Passwords do not match.' });
-      const passwordError = validatePassword(body.password);
-      if (passwordError) return json(res, 400, { error: passwordError });
-      const user = await createUser({ name: String(body.name).trim(), email: String(body.email).trim(), studentId: String(body.studentId || '').trim(), password: body.password, role: 'student', status: 'active' });
-      const session = await createSession(user);
-      return json(res, 201, { user: publicUser(user) }, { 'Set-Cookie': authCookies(session.accessToken, session.refreshToken, session.refreshTtlSeconds) });
-    }
-    if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/auth/password-reset-requests`) {
-      const body = await parseBody(req);
-      if (!body.identifier) return json(res, 400, { error: 'Email or student ID is required.' });
-      // Return the same response for unknown accounts to avoid account enumeration.
-      await createPasswordResetRequest(String(body.identifier), body.message);
-      return json(res, 202, { message: 'If an active account matches that identifier, a reset request has been recorded.' });
-    }
-    if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/auth/password-reset`) {
-      const body = await parseBody(req);
-      if (!body.token || !body.password || body.password !== body.confirmPassword) return json(res, 400, { error: 'A valid token and matching passwords are required.' });
-      const passwordError = validatePassword(body.password); if (passwordError) return json(res, 400, { error: passwordError });
-      await consumePasswordResetToken(String(body.token), body.password);
-      return json(res, 204, {});
-    }
-    if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/auth/refresh`) {
-      const session = await refreshSession(req);
-      if (!session) return json(res, 401, { error: 'Session expired' }, { 'Set-Cookie': clearAuthCookies() });
-      return json(res, 200, { user: publicUser(session.user) }, { 'Set-Cookie': authCookies(session.accessToken, session.refreshToken, session.refreshTtlSeconds) });
-    }
-    if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/auth/logout`) { await logout(req); return json(res, 204, {}, { 'Set-Cookie': clearAuthCookies() }); }
-    if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/auth/me`) { const user = await currentUser(req); return user ? json(res, 200, { user: publicUser(user) }) : unauthorized(res); }
+    if (await handleAuthRequest(req, res, url)) return true;
 
     const user = await currentUser(req);
     if (!user) return unauthorized(res);
     if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/dashboard`) {
+      if (!requirePermission(res, user, Permissions.dashboardRead)) return;
       const dashboard = await getDashboardData(user);
       if (user.role !== 'student') dashboard.catalog = await getDashboardSummary();
-      if (user.role === 'super_admin') dashboard.systemHealth = await getSystemHealth();
+      if (hasPermission(user, Permissions.systemRead)) dashboard.systemHealth = await getSystemHealth();
       return json(res, 200, dashboard);
     }
     if (req.method === 'PUT' && url.pathname === `${env.apiBasePath}/profile`) {
+      if (!requirePermission(res, user, Permissions.profileWrite)) return;
       const body = await parseBody(req);
       return json(res, 200, { user: await updateOwnProfile(user.id, body) });
     }
     if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/student/complaints`) {
-      if (user.role !== 'student') return forbidden(res);
+      if (user.role !== 'student' || !requirePermission(res, user, Permissions.studentComplaintCreate)) return;
       const body = await parseBody(req);
       if (!String(body.message || '').trim()) return json(res, 400, { error: 'A complaint message is required.' });
       return json(res, 201, { complaint: await createComplaint(user, String(body.message).trim()) });
     }
-    if (url.pathname.startsWith(`${env.apiBasePath}/admin/password-reset-requests`) || url.pathname.startsWith(`${env.apiBasePath}/admin/complaints`) || url.pathname.startsWith(`${env.apiBasePath}/admin/communications`)) {
-      if (user.role !== 'super_admin') return forbidden(res);
+    if (url.pathname.startsWith(`${env.apiBasePath}/admin/password-reset-requests`)) {
+      if (!requirePermission(res, user, Permissions.recoveryManage)) return;
+    }
+    if (url.pathname.startsWith(`${env.apiBasePath}/admin/complaints`) || url.pathname.startsWith(`${env.apiBasePath}/admin/communications`)) {
+      if (!requirePermission(res, user, Permissions.complaintsManage)) return;
     }
     if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/password-reset-requests`) return json(res, 200, { requests: await listPasswordResetRequests() });
     if (req.method === 'POST' && url.pathname.match(new RegExp(`^${env.apiBasePath}/admin/password-reset-requests/[^/]+/(approve|reject)$`))) {
@@ -237,7 +171,8 @@ export async function handleApi(req, res, url) {
       return json(res, 201, { communication: await createCommunication(body.recipientId, String(body.message).trim(), user.id) });
     }
     if (url.pathname === `${env.apiBasePath}/admin/users` || url.pathname.startsWith(`${env.apiBasePath}/admin/users/`)) {
-      if (user.role !== 'super_admin') return forbidden(res);
+      const permission = req.method === 'GET' ? Permissions.usersRead : req.method === 'DELETE' ? Permissions.usersDelete : Permissions.usersWrite;
+      if (!requirePermission(res, user, permission)) return;
     }
     if (!canAccess(user, req, url.pathname)) return forbidden(res);
     if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/users`) return json(res, 200, { users: await listUsers() });
@@ -351,13 +286,7 @@ export async function handleApi(req, res, url) {
       return json(res, 200, await getSystemHealth());
     }
 
-    if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/catalog`) {
-      return json(res, 200, await getCatalog({ includeHidden: url.searchParams.get('audience') === 'admin' }));
-    }
-
-    if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/faculties`) {
-      return json(res, 200, await getFaculties());
-    }
+    if (await handleCatalogReadRequest(req, res, url)) return true;
 
     if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/faculties`) {
       const body = await parseBody(req);
@@ -369,15 +298,11 @@ export async function handleApi(req, res, url) {
     }
 
     if (req.method === 'PUT' && url.pathname.startsWith(`${env.apiBasePath}/faculties/`)) {
-      return handleUpdate(req, res, validateFacultyPatch, updateFaculty, idFromPath(url.pathname), 'Faculty');
+      return handleCatalogUpdate(req, res, validateFacultyPatch, updateFaculty, idFromPath(url.pathname), 'Faculty');
     }
 
     if (req.method === 'DELETE' && url.pathname.startsWith(`${env.apiBasePath}/faculties/`)) {
-      return handleDelete(res, deleteFaculty, idFromPath(url.pathname), 'Faculty');
-    }
-
-    if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/programs`) {
-      return json(res, 200, await getPrograms(toNumber(url.searchParams.get('facultyId'))));
+      return handleCatalogDelete(res, deleteFaculty, idFromPath(url.pathname), 'Faculty');
     }
 
     if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/programs`) {
@@ -390,7 +315,7 @@ export async function handleApi(req, res, url) {
     }
 
     if (req.method === 'PUT' && url.pathname.startsWith(`${env.apiBasePath}/programs/`)) {
-      return handleUpdate(req, res, validateProgramPatch, updateProgram, idFromPath(url.pathname), 'Program');
+      return handleCatalogUpdate(req, res, validateProgramPatch, updateProgram, idFromPath(url.pathname), 'Program');
     }
 
     if (req.method === 'GET' && url.pathname.match(new RegExp(`^${env.apiBasePath}/programs/\\d+/delete-impact$`))) {
@@ -403,20 +328,7 @@ export async function handleApi(req, res, url) {
     }
 
     if (req.method === 'DELETE' && url.pathname.startsWith(`${env.apiBasePath}/programs/`)) {
-      return handleDelete(res, deleteProgram, idFromPath(url.pathname), 'Program');
-    }
-
-    if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/program-courses`) {
-      return json(
-        res,
-        200,
-        await getProgramCourses({
-          facultyId: toNumber(url.searchParams.get('facultyId')),
-          programId: toNumber(url.searchParams.get('programId')),
-          yearNo: toNumber(url.searchParams.get('yearNo')),
-          semesterNo: toNumber(url.searchParams.get('semesterNo'))
-        }, { includeHidden: url.searchParams.get('audience') === 'admin' })
-      );
+      return handleCatalogDelete(res, deleteProgram, idFromPath(url.pathname), 'Program');
     }
 
     if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/program-courses`) {
@@ -475,7 +387,7 @@ export async function handleApi(req, res, url) {
     }
 
     if (req.method === 'PUT' && url.pathname.startsWith(`${env.apiBasePath}/program-courses/`)) {
-      return handleUpdate(req, res, validateProgramCoursePatch, updateProgramCourse, idFromPath(url.pathname), 'Program course');
+      return handleCatalogUpdate(req, res, validateProgramCoursePatch, updateProgramCourse, idFromPath(url.pathname), 'Program course');
     }
 
     if (req.method === 'GET' && url.pathname.match(new RegExp(`^${env.apiBasePath}/program-courses/\\d+/delete-impact$`))) {
@@ -488,12 +400,12 @@ export async function handleApi(req, res, url) {
     }
 
     if (req.method === 'DELETE' && url.pathname.startsWith(`${env.apiBasePath}/program-courses/`)) {
-      return handleDelete(res, deleteProgramCourse, idFromPath(url.pathname), 'Program course');
+      return handleCatalogDelete(res, deleteProgramCourse, idFromPath(url.pathname), 'Program course');
     }
 
     return json(res, 404, { error: 'API route not found' });
   } catch (error) {
-    console.error('API route error:', error);
+    console.error(JSON.stringify({ requestId: req.requestId, event: 'api_error', name: error?.name, code: error?.code, message: String(error?.message || '').replace(/(?:password|token|secret|cookie)=?\S*/ig, '[redacted]') }));
     if (error.message === 'INVALID_JSON') return json(res, 400, { error: 'Invalid JSON payload' });
     if (error.message === 'PAYLOAD_TOO_LARGE') return json(res, 413, { error: 'Import file is too large (maximum 12 MB).' });
     if (error.message === 'PG_DRIVER_MISSING') return json(res, 500, { error: 'PostgreSQL driver is missing. Install pg.' });
@@ -501,6 +413,7 @@ export async function handleApi(req, res, url) {
     if (String(error.message || '').startsWith('FK_')) return json(res, 400, { error: 'Invalid relation id provided.' });
     if (error.code === '23505') return json(res, 409, { error: String(error.constraint || '').includes('student_id') ? 'Student ID is already in use.' : 'Email is already in use.' });
     if (error.message && !/password hash|stored password/i.test(error.message)) return json(res, 400, { error: error.message });
-    return json(res, 500, { error: 'Internal server error' });
+    const mapped = toErrorResponse(error);
+    return json(res, mapped.status, mapped.body);
   }
 }

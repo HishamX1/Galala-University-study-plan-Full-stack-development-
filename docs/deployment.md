@@ -2,10 +2,10 @@
 
 ## Backend On Render
 
-Use `modernization/render.yaml` or create a Render Web Service manually. The manifest uses `npm ci` and starts only after configuration and database connectivity validation succeed.
+Use `render.yaml` or create a Render Web Service manually. The manifest uses `npm ci` and starts only after configuration and database connectivity validation succeed.
 
-- Root directory: `modernization`
-- Build command: `npm install`
+- Root directory: repository root
+- Build command: `npm ci`
 - Start command: `npm run start`
 
 Required env vars:
@@ -23,9 +23,9 @@ Set `NODE_ENV=production`. Do not set `CORS_ORIGIN=*`; startup rejects it. Keep 
 
 ## Frontend On Netlify
 
-The root `netlify.toml` publishes `modernization/frontend`.
+The root `netlify.toml` publishes `frontend`.
 
-Set the deployed backend API URL in `modernization/frontend/config.js`:
+Set the deployed backend API URL in `frontend/config.js`:
 
 ```js
 window.__GU_API_BASE__ = 'https://your-render-backend.onrender.com/api';
@@ -43,7 +43,7 @@ Netlify routes:
 
 ## Checks
 
-Before deployment, from `modernization/`:
+Before deployment, from the repository root:
 
 ```bash
 npm ci

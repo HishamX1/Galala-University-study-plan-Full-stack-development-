@@ -1,7 +1,28 @@
+# Node dependencies
 node_modules/
+
+# Environment and secrets
 .env
 .env.*
 !.env.example
 
+# Logs and debug output
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# Local editor settings
+.vscode/
+
+# Generated/local Supabase state
+supabase/.temp/
+
+# Coverage and test output
+coverage/
+.nyc_output/

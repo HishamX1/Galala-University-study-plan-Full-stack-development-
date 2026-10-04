@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { env, validateStartupConfig } from './config/env.js';
 import { handleApi } from './routes/catalogRoutes.js';
 import { databaseDiagnosticMessage, ensureDataStore } from './db/client.js';
+import { applySecurityHeaders, assignRequestId, safeRequestLog } from './middleware/requestContext.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -53,11 +54,13 @@ try {
 
 const server = http.createServer(async (req, res) => {
   const started = Date.now();
+  assignRequestId(req, res);
+  applySecurityHeaders(res);
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   const apiHandled = await handleApi(req, res, url);
   if (apiHandled !== false) {
-    console.log(`${req.method} ${url.pathname} ${res.statusCode} ${Date.now() - started}ms`);
+    safeRequestLog(req, res, started);
     return;
   }
 
@@ -85,7 +88,7 @@ const server = http.createServer(async (req, res) => {
     serveFile(res, filePath);
   }
 
-  console.log(`${req.method} ${url.pathname} ${res.statusCode} ${Date.now() - started}ms`);
+  safeRequestLog(req, res, started);
 });
 
 server.listen(env.port, () => {

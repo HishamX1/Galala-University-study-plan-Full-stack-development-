@@ -6,12 +6,12 @@ The live runtime is intentionally small:
 
 ## Active Runtime
 
-- Student UI: `modernization/frontend/student/index.html`
-- Admin UI: `modernization/frontend/admin/index.html`
-- Backend API: `modernization/backend/src/server.js`
-- API routes: `modernization/backend/src/routes/catalogRoutes.js`
-- Services: `modernization/backend/src/services/catalogService.js`
-- Database client: `modernization/backend/src/db/client.js`
+- Student UI: `frontend/student/index.html`
+- Admin UI: `frontend/admin/index.html`
+- Backend API: `backend/src/server.js`
+- API routes: `backend/src/routes/catalogRoutes.js`
+- Services: `backend/src/services/catalogService.js`
+- Database client: `backend/src/db/client.js`
 
 ## Data Model
 
@@ -31,3 +31,5 @@ The UI derives year and semester groupings from `program_courses.year_no` and `p
 - Backend is the only code that connects to Supabase.
 - File-based stores and static data fallbacks are not part of the live runtime.
 - Schema ownership stays in `supabase/migrations/20260420120000_init_schema.sql`.
+
+The repository-root tree is canonical. `modernization/` is an older duplicate retained temporarily for migration verification and is not a runtime source.

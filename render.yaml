@@ -2,7 +2,7 @@ services:
   - type: web
     name: gu-pt-modernization
     env: node
-    rootDir: modernization
+    rootDir: .
     buildCommand: npm ci
     startCommand: npm run start
     envVars:
