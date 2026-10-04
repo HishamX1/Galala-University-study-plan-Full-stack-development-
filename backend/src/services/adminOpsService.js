@@ -1,5 +1,7 @@
 import { query, withPostgresClient } from '../db/client.js';
 import XLSX from 'xlsx';
+import { insertAuditLog, listAuditLogs } from '../repositories/auditRepository.js';
+import { findBackupSnapshot, insertBackup, listBackups } from '../repositories/backupRepository.js';
 
 const ENTITY_TABLES = {
   faculty: 'faculties',
@@ -166,20 +168,7 @@ async function catalogRows(client) {
 }
 
 export async function logAdminAction(client, { action, entity, entityId = null, oldValues = null, newValues = null, description = '', adminUser = 'Admin' }) {
-  const exec = client ? client.query.bind(client) : query;
-  await exec(
-    `INSERT INTO admin_audit_logs (admin_user, action, entity, entity_id, old_values, new_values, description)
-     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)`,
-    [
-      adminUser,
-      action,
-      entity,
-      entityId,
-      oldValues ? JSON.stringify(oldValues) : null,
-      newValues ? JSON.stringify(newValues) : null,
-      description
-    ]
-  );
+  await insertAuditLog(client || { query }, { action, entity, entityId, oldValues, newValues, description, adminUser });
 }
 
 export async function getAuditLogs(filters = {}) {
@@ -201,14 +190,7 @@ export async function getAuditLogs(filters = {}) {
   }
   const order = filters.order === 'oldest' ? 'ASC' : 'DESC';
   const limit = Math.min(Number(filters.limit) || 100, 500);
-  const { rows } = await query(
-    `SELECT id, created_at, admin_user, action, entity, entity_id, old_values, new_values, description
-       FROM admin_audit_logs
-      ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
-      ORDER BY created_at ${order}
-      LIMIT ${limit}`,
-    params
-  );
+  const { rows } = await listAuditLogs({ query }, { ...filters, limit });
   return rows.map((row) => ({ ...row, id: toInt(row.id), entityId: row.entity_id == null ? null : toInt(row.entity_id) }));
 }
 
@@ -448,12 +430,7 @@ export async function createBackup(format = 'json') {
       programCourses: catalog.programCourses.length,
       relationships: catalog.relationships.length
     };
-    const { rows } = await client.query(
-      `INSERT INTO admin_backup_history (format, scope, record_counts, snapshot, description)
-       VALUES ($1, 'catalog', $2::jsonb, $3::jsonb, $4)
-       RETURNING id, created_at, admin_user, format, scope, record_counts, description`,
-      [format, JSON.stringify(recordCounts), JSON.stringify(catalog), `Catalog backup generated as ${format}`]
-    );
+    const { rows } = await insertBackup(client, format, recordCounts, catalog, `Catalog backup generated as ${format}`);
     await logAdminAction(client, {
       action: 'Database Backup',
       entity: 'backup',
@@ -466,17 +443,12 @@ export async function createBackup(format = 'json') {
 }
 
 export async function getBackups() {
-  const { rows } = await query(
-    `SELECT id, created_at, admin_user, format, scope, record_counts, description
-       FROM admin_backup_history
-      ORDER BY created_at DESC
-      LIMIT 50`
-  );
+  const { rows } = await listBackups({ query });
   return rows.map((row) => ({ ...row, id: toInt(row.id) }));
 }
 
 export async function getBackupDownload(id) {
-  const { rows } = await query('SELECT id, format, snapshot FROM admin_backup_history WHERE id = $1', [id]);
+  const { rows } = await findBackupSnapshot({ query }, id);
   if (!rows.length) return null;
   const row = rows[0];
   return {

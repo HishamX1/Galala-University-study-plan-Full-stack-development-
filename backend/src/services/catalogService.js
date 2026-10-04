@@ -101,15 +101,24 @@ async function getProgramCourseById(id, client = null) {
 }
 
 export async function getFaculties() {
-  const rows = await listActiveFaculties();
+  const rows = await listActiveFaculties({ query });
   return rows.map(mapFaculty);
 }
 
 export async function createFaculty(data) {
   try {
-    const created = await insertFaculty(data.name.trim(), { query });
-    await logAdminAction(null, { action: 'Created Faculty', entity: 'faculty', entityId: created.id, newValues: created, description: `Created faculty ${created.name}` });
-    return mapFaculty(created);
+    return await withPostgresClient(async (client) => {
+      await client.query('BEGIN');
+      try {
+        const created = await insertFaculty(data.name.trim(), client);
+        await logAdminAction(client, { action: 'Created Faculty', entity: 'faculty', entityId: created.id, newValues: created, description: `Created faculty ${created.name}` });
+        await client.query('COMMIT');
+        return mapFaculty(created);
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw error;
+      }
+    });
   } catch (error) {
     if (duplicate(error)) return null;
     throw error;
@@ -178,9 +187,18 @@ export async function getPrograms(facultyId) {
 
 export async function createProgram(data) {
   try {
-    const created = await insertProgram(data, { query });
-    await logAdminAction(null, { action: 'Created Program', entity: 'program', entityId: created.id, newValues: created, description: `Created program ${created.name}` });
-    return mapProgram(created);
+    return await withPostgresClient(async (client) => {
+      await client.query('BEGIN');
+      try {
+        const created = await insertProgram(data, client);
+        await logAdminAction(client, { action: 'Created Program', entity: 'program', entityId: created.id, newValues: created, description: `Created program ${created.name}` });
+        await client.query('COMMIT');
+        return mapProgram(created);
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw error;
+      }
+    });
   } catch (error) {
     if (duplicate(error)) return null;
     throw error;
@@ -189,10 +207,22 @@ export async function createProgram(data) {
 
 export async function updateProgram(id, data) {
   try {
-    const { rows, rowCount } = await updateActiveProgram(id, data, { query });
-    if (!rowCount) return false;
-    await logAdminAction(null, { action: 'Updated Program', entity: 'program', entityId: id, newValues: rows[0], description: `Updated program ${rows[0].name}` });
-    return mapProgram(rows[0]);
+    return await withPostgresClient(async (client) => {
+      await client.query('BEGIN');
+      try {
+        const { rows, rowCount } = await updateActiveProgram(id, data, client);
+        if (!rowCount) {
+          await client.query('ROLLBACK');
+          return false;
+        }
+        await logAdminAction(client, { action: 'Updated Program', entity: 'program', entityId: id, newValues: rows[0], description: `Updated program ${rows[0].name}` });
+        await client.query('COMMIT');
+        return mapProgram(rows[0]);
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw error;
+      }
+    });
   } catch (error) {
     if (duplicate(error)) return null;
     throw error;
@@ -393,9 +423,18 @@ export async function updatePrerequisites(programCourseId, prerequisiteCourseIds
 export async function addPrerequisiteRelation(programCourseId, prerequisiteCourseId) {
   if (Number(programCourseId) === Number(prerequisiteCourseId)) throw new Error('FK_SELF_RELATION');
   try {
-    const rows = [await createPrerequisiteRow(programCourseId, prerequisiteCourseId, { query })];
-    await logAdminAction(null, { action: 'Created Relation', entity: 'relation', entityId: rows[0].id, newValues: rows[0], description: 'Created prerequisite relationship' });
-    return mapPrerequisiteRelation(rows[0]);
+    return await withPostgresClient(async (client) => {
+      await client.query('BEGIN');
+      try {
+        const rows = [await createPrerequisiteRow(programCourseId, prerequisiteCourseId, client)];
+        await logAdminAction(client, { action: 'Created Relation', entity: 'relation', entityId: rows[0].id, newValues: rows[0], description: 'Created prerequisite relationship' });
+        await client.query('COMMIT');
+        return mapPrerequisiteRelation(rows[0]);
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw error;
+      }
+    });
   } catch (error) {
     if (duplicate(error)) return null;
     if (String(error?.code) === '23503' || String(error?.code) === '23514') throw new Error('FK_PROGRAM_COURSE');
@@ -404,15 +443,33 @@ export async function addPrerequisiteRelation(programCourseId, prerequisiteCours
 }
 
 export async function deletePrerequisiteRelation(programCourseId, prerequisiteCourseId) {
-  const { rows, rowCount } = await softDeletePrerequisiteRow(programCourseId, prerequisiteCourseId, { query });
-  if (rowCount) await logAdminAction(null, { action: 'Deleted Relation', entity: 'relation', entityId: rows[0].id, oldValues: rows[0], description: 'Moved prerequisite relationship to recycle bin' });
-  return rowCount > 0;
+  return withPostgresClient(async (client) => {
+    await client.query('BEGIN');
+    try {
+      const { rows, rowCount } = await softDeletePrerequisiteRow(programCourseId, prerequisiteCourseId, client);
+      if (rowCount) await logAdminAction(client, { action: 'Deleted Relation', entity: 'relation', entityId: rows[0].id, oldValues: rows[0], description: 'Moved prerequisite relationship to recycle bin' });
+      await client.query('COMMIT');
+      return rowCount > 0;
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    }
+  });
 }
 
 export async function updatePrerequisiteVisibility(programCourseId, prerequisiteCourseId, visibleToStudents) {
-  const { rows, rowCount } = await updatePrerequisiteVisibilityRow(programCourseId, prerequisiteCourseId, visibleToStudents, { query });
-  if (rowCount) await logAdminAction(null, { action: visibleToStudents ? 'Restored Relation Visibility' : 'Hidden Relation', entity: 'relation', entityId: rows[0].id, newValues: rows[0], description: `Relation ${visibleToStudents ? 'shown to' : 'hidden from'} students` });
-  return rowCount > 0;
+  return withPostgresClient(async (client) => {
+    await client.query('BEGIN');
+    try {
+      const { rows, rowCount } = await updatePrerequisiteVisibilityRow(programCourseId, prerequisiteCourseId, visibleToStudents, client);
+      if (rowCount) await logAdminAction(client, { action: visibleToStudents ? 'Restored Relation Visibility' : 'Hidden Relation', entity: 'relation', entityId: rows[0].id, newValues: rows[0], description: `Relation ${visibleToStudents ? 'shown to' : 'hidden from'} students` });
+      await client.query('COMMIT');
+      return rowCount > 0;
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    }
+  });
 }
 
 export async function getCatalog(options = {}) {

@@ -210,10 +210,12 @@ export async function handleApi(req, res, url) {
     }
 
     if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/dashboard`) {
+      if (!requirePermission(res, user, Permissions.dashboardRead)) return;
       return json(res, 200, await getDashboardSummary());
     }
 
     if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/audit-logs`) {
+      if (!requirePermission(res, user, Permissions.auditRead)) return;
       return json(res, 200, await getAuditLogs({
         range: url.searchParams.get('range') || '',
         entity: url.searchParams.get('entity') || '',
@@ -224,10 +226,12 @@ export async function handleApi(req, res, url) {
     }
 
     if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/recycle-bin`) {
+      if (user.role !== 'super_admin') return forbidden(res);
       return json(res, 200, await getRecycleBin());
     }
 
     if (req.method === 'POST' && url.pathname.match(new RegExp(`^${env.apiBasePath}/admin/recycle-bin/[^/]+/\\d+/restore$`))) {
+      if (user.role !== 'super_admin') return forbidden(res);
       const parts = url.pathname.split('/');
       const kind = parts.at(-3);
       const id = toNumber(parts.at(-2));
@@ -239,6 +243,7 @@ export async function handleApi(req, res, url) {
     }
 
     if (req.method === 'DELETE' && url.pathname.match(new RegExp(`^${env.apiBasePath}/admin/recycle-bin/[^/]+/\\d+$`))) {
+      if (user.role !== 'super_admin') return forbidden(res);
       const parts = url.pathname.split('/');
       const kind = parts.at(-2);
       const id = toNumber(parts.at(-1));
@@ -250,30 +255,36 @@ export async function handleApi(req, res, url) {
     }
 
     if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/admin/import/validate`) {
+      if (!requirePermission(res, user, Permissions.catalogImport)) return;
       const body = await parseBody(req);
       return json(res, 200, await validateImport(body));
     }
 
     if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/admin/import`) {
+      if (!requirePermission(res, user, Permissions.catalogImport)) return;
       const body = await parseBody(req);
       const result = await importCatalog(body);
       return json(res, result.valid ? 201 : 400, result);
     }
 
     if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/export`) {
+      if (!requirePermission(res, user, Permissions.catalogExport)) return;
       return download(res, await exportCatalog(url.searchParams.get('format') || 'json'));
     }
 
     if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/backups`) {
+      if (!requirePermission(res, user, Permissions.backupRun)) return;
       return json(res, 200, await getBackups());
     }
 
     if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/admin/backups`) {
+      if (!requirePermission(res, user, Permissions.backupRun)) return;
       const body = await parseBody(req);
       return json(res, 201, await createBackup(body.format || 'json'));
     }
 
     if (req.method === 'GET' && url.pathname.match(new RegExp(`^${env.apiBasePath}/admin/backups/\\d+/download$`))) {
+      if (!requirePermission(res, user, Permissions.backupRun)) return;
       const id = toNumber(url.pathname.split('/').at(-2));
       const idErr = validateEntityId(id, 'backup id');
       if (idErr) return json(res, 400, { error: idErr });
@@ -283,6 +294,7 @@ export async function handleApi(req, res, url) {
     }
 
     if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/system-health`) {
+      if (!requirePermission(res, user, Permissions.systemRead)) return;
       return json(res, 200, await getSystemHealth());
     }
 
