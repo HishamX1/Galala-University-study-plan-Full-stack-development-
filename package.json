@@ -11,6 +11,7 @@
     "reset-user-password": "node scripts/reset-password.js",
     "test:auth": "node scripts/auth-lifecycle-test.js",
     "test:session": "node scripts/session-e2e-test.js",
+    "test:refresh-rollback": "node scripts/refresh-transaction-rollback-test.js",
     "test:student-portal": "node scripts/student-portal-regression-test.js",
     "test:dashboard": "node scripts/dashboard-contract-test.js",
     "test:recycle-bin": "node scripts/recycle-bin-regression-test.js",

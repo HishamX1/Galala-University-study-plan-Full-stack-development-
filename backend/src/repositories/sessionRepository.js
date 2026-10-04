@@ -7,7 +7,7 @@ export async function createRefreshSession(userId, hash, ttlDays, executor) {
 }
 
 export async function findActiveRefreshSession(hash, executor) {
-  return (await executor.query("SELECT u.* FROM public.auth_refresh_tokens t JOIN public.app_users u ON u.id=t.user_id WHERE t.token_hash=$1 AND t.revoked_at IS NULL AND t.expires_at>now() AND u.status='active'", [hash])).rows[0] || null;
+  return (await executor.query("SELECT u.* FROM public.auth_refresh_tokens t JOIN public.app_users u ON u.id=t.user_id WHERE t.token_hash=$1 AND t.revoked_at IS NULL AND t.expires_at>now() AND u.status='active' FOR UPDATE OF t", [hash])).rows[0] || null;
 }
 
 export async function revokeRefreshSession(hash, executor) {

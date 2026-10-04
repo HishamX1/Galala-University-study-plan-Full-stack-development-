@@ -66,11 +66,11 @@ export async function authenticate(identifier, password) {
   if (!user || !bcryptCompare) return null;
   return user;
 }
-export async function createSession(user) {
+export async function createSession(user, executor = { query }) {
   const refreshToken = crypto.randomBytes(48).toString('base64url');
   const refreshTokenHash = tokenHash(refreshToken);
   const refreshTtlDays = user.role === 'super_admin' ? SUPER_ADMIN_REFRESH_TTL_DAYS : STANDARD_REFRESH_TTL_DAYS;
-  await createRefreshSession(user.id, refreshTokenHash, refreshTtlDays, { query });
+  await createRefreshSession(user.id, refreshTokenHash, refreshTtlDays, executor);
   return {
     accessToken: jwt({ sub: user.id, role: user.role, exp: Math.floor(Date.now() / 1000) + ACCESS_TTL_SECONDS }),
     refreshToken,
@@ -83,14 +83,28 @@ export async function currentUser(req) {
   if (!claim?.sub) return null;
   return findActiveUserById(claim.sub, { query });
 }
+export async function rotateRefreshSession(hash, client) {
+  const user = await findActiveRefreshSession(hash, client);
+  if (!user) return null;
+  await revokeRefreshSession(hash, client);
+  return { user, ...(await createSession(user, client)) };
+}
 export async function refreshSession(req) {
   const token = parseCookies(req.headers.cookie).gu_refresh;
   if (!token) return null;
   const hash = tokenHash(token);
-  const user = await findActiveRefreshSession(hash, { query });
-  if (!user) return null;
-  await revokeRefreshSession(hash, { query });
-  return { user, ...(await createSession(user)) };
+  return withPostgresClient(async (client) => {
+    await client.query('BEGIN');
+    try {
+      const session = await rotateRefreshSession(hash, client);
+      if (!session) { await client.query('ROLLBACK'); return null; }
+      await client.query('COMMIT');
+      return session;
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    }
+  });
 }
 export async function logout(req) { const token = parseCookies(req.headers.cookie).gu_refresh; if (token) await revokeRefreshSession(tokenHash(token), { query }); }
 export async function listUsers() { return listUserRows({ query }); }

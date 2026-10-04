@@ -53,10 +53,17 @@ try {
     const cookie = loginCookies.map((value) => value.split(';')[0]).join('; ');
     const me = await request(port, '/api/auth/me', 'GET', null, cookie);
     if (me.status !== 200) throw new Error(`${item.role} session was not preserved for /auth/me.`);
-    const refresh = await request(port, '/api/auth/refresh', 'POST', null, cookie);
-    const refreshedCookies = refresh.headers['set-cookie'] || [];
-    if (refresh.status !== 200 || refreshedCookies.length !== 2) throw new Error(`${item.role} refresh-token renewal failed.`);
+    const rotations = await Promise.all([
+      request(port, '/api/auth/refresh', 'POST', null, cookie),
+      request(port, '/api/auth/refresh', 'POST', null, cookie)
+    ]);
+    const successfulRotations = rotations.filter((result) => result.status === 200);
+    const rejectedRotations = rotations.filter((result) => result.status === 401);
+    if (successfulRotations.length !== 1 || rejectedRotations.length !== 1) throw new Error(`${item.role} refresh-token replay race was not rejected.`);
+    const refreshedCookies = successfulRotations[0].headers['set-cookie'] || [];
+    if (refreshedCookies.length !== 2) throw new Error(`${item.role} refresh-token renewal failed.`);
     const refreshedCookie = refreshedCookies.map((value) => value.split(';')[0]).join('; ');
+    if ((await request(port, '/api/auth/refresh', 'POST', null, cookie)).status !== 401) throw new Error(`${item.role} old refresh token was reusable.`);
     const logout = await request(port, '/api/auth/logout', 'POST', null, refreshedCookie);
     if (logout.status !== 204 || !(logout.headers['set-cookie'] || []).every((value) => /Max-Age=0/.test(value))) throw new Error(`${item.role} logout cookie clearing failed.`);
     if ((await request(port, '/api/auth/me', 'GET', null, 'gu_access=; gu_refresh=')).status !== 401) throw new Error(`${item.role} logout did not clear access.`);
