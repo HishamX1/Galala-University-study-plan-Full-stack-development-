@@ -3,7 +3,7 @@ import XLSX from 'xlsx';
 import { insertAuditLog, listAuditLogs } from '../repositories/auditRepository.js';
 import { findBackupSnapshot, insertBackup, listBackups } from '../repositories/backupRepository.js';
 import { insertImportedRow, readCatalogSnapshot, readImportReferences } from '../repositories/adminCatalogRepository.js';
-import { listDeletedCatalog } from '../repositories/recycleBinRepository.js';
+import { deleteEntity, deleteProgramCourseAndOrphanCourse, findDeletedEntity, findEntity, listDeletedCatalog, listProgramCourseIdsForFaculty, listProgramCourseIdsForProgram, restoreEntity, restorePrerequisitesForCourse, restorePrerequisitesForCourses, restoreProgramCoursesForFaculty, restoreProgramCoursesForProgram, restoreProgramsForFaculty } from '../repositories/recycleBinRepository.js';
 
 const ENTITY_TABLES = {
   faculty: 'faculties',
@@ -262,37 +262,30 @@ export async function getRecycleBin() {
 }
 
 export async function restoreRecycleItem(kind, id) {
-  const table = ENTITY_TABLES[kind];
-  if (!table) throw new Error('INVALID_ENTITY');
+  if (!ENTITY_TABLES[kind]) throw new Error('INVALID_ENTITY');
   return withPostgresClient(async (client) => {
     await client.query('BEGIN');
     try {
-      const current = await client.query(`SELECT * FROM ${table} WHERE id = $1 AND deleted_at IS NOT NULL`, [id]);
+      const current = await findDeletedEntity(client, kind, id);
       if (!current.rowCount) {
         await client.query('ROLLBACK');
         return false;
       }
-      await client.query(`UPDATE ${table} SET deleted_at = NULL, deleted_by = NULL, delete_reason = NULL, updated_at = now() WHERE id = $1`, [id]);
+      await restoreEntity(client, kind, id);
       if (kind === 'faculty') {
-        const children = await client.query(
-          `SELECT pc.id
-             FROM program_courses pc
-             JOIN programs p ON p.id = pc.program_id
-            WHERE p.faculty_id = $1`,
-          [id]
-        );
+        const children = await listProgramCourseIdsForFaculty(client, id);
         const childIds = children.rows.map((row) => toInt(row.id));
-        await client.query('UPDATE programs SET deleted_at = NULL, deleted_by = NULL, delete_reason = NULL, updated_at = now() WHERE faculty_id = $1', [id]);
-        await client.query('UPDATE program_courses SET deleted_at = NULL, deleted_by = NULL, delete_reason = NULL, updated_at = now() WHERE program_id IN (SELECT id FROM programs WHERE faculty_id = $1)', [id]);
-        if (childIds.length) await client.query('UPDATE course_prerequisites SET deleted_at = NULL, deleted_by = NULL, delete_reason = NULL, updated_at = now() WHERE course_id = ANY($1::bigint[]) OR prerequisite_course_id = ANY($1::bigint[])', [childIds]);
+        await restoreProgramsForFaculty(client, id);
+        await restoreProgramCoursesForFaculty(client, id);
+        if (childIds.length) await restorePrerequisitesForCourses(client, childIds);
       }
       if (kind === 'program') {
-        const children = await client.query('SELECT id FROM program_courses WHERE program_id = $1', [id]);
+        const children = await listProgramCourseIdsForProgram(client, id);
         const childIds = children.rows.map((row) => toInt(row.id));
-        await client.query('UPDATE program_courses SET deleted_at = NULL, deleted_by = NULL, delete_reason = NULL, updated_at = now() WHERE program_id = $1', [id]);
-        if (childIds.length) await client.query('UPDATE course_prerequisites SET deleted_at = NULL, deleted_by = NULL, delete_reason = NULL, updated_at = now() WHERE course_id = ANY($1::bigint[]) OR prerequisite_course_id = ANY($1::bigint[])', [childIds]);
+        await restoreProgramCoursesForProgram(client, id);
+        if (childIds.length) await restorePrerequisitesForCourses(client, childIds);
       }
-      if (kind === 'course') await client.query('UPDATE course_prerequisites SET deleted_at = NULL, deleted_by = NULL, delete_reason = NULL, updated_at = now() WHERE course_id = $1 OR prerequisite_course_id = $1', [id]);
+      if (kind === 'course') await restorePrerequisitesForCourse(client, id);
       await logAdminAction(client, {
         action: `Restored ${kind}`,
         entity: kind,
@@ -311,31 +304,24 @@ export async function restoreRecycleItem(kind, id) {
 }
 
 export async function permanentlyDeleteRecycleItem(kind, id) {
-  const table = ENTITY_TABLES[kind];
-  if (!table) throw new Error('INVALID_ENTITY');
+  if (!ENTITY_TABLES[kind]) throw new Error('INVALID_ENTITY');
   return withPostgresClient(async (client) => {
     await client.query('BEGIN');
     try {
-      const current = await client.query(`SELECT * FROM ${table} WHERE id = $1`, [id]);
+      const current = await findEntity(client, kind, id);
       if (!current.rowCount) {
         await client.query('ROLLBACK');
         return false;
       }
       if (kind === 'faculty') {
-        await client.query('DELETE FROM faculties WHERE id = $1', [id]);
+        await deleteEntity(client, kind, id);
       } else if (kind === 'program') {
-        await client.query('DELETE FROM programs WHERE id = $1', [id]);
+        await deleteEntity(client, kind, id);
       } else if (kind === 'course') {
         const courseId = current.rows[0].course_id;
-        await client.query('DELETE FROM program_courses WHERE id = $1', [id]);
-        await client.query(
-          `DELETE FROM courses c
-            WHERE c.id = $1
-              AND NOT EXISTS (SELECT 1 FROM program_courses pc WHERE pc.course_id = c.id)`,
-          [courseId]
-        );
+        await deleteProgramCourseAndOrphanCourse(client, id, courseId);
       } else {
-        await client.query(`DELETE FROM ${table} WHERE id = $1`, [id]);
+        await deleteEntity(client, kind, id);
       }
       await logAdminAction(client, {
         action: `Permanently Deleted ${kind}`,

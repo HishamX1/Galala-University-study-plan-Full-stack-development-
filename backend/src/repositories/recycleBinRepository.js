@@ -18,3 +18,72 @@ export async function listDeletedCatalog(executor) {
       WHERE cp.deleted_at IS NOT NULL
       ORDER BY deleted_at DESC`);
 }
+
+const entityTables = Object.freeze({
+  faculty: 'faculties',
+  program: 'programs',
+  course: 'program_courses',
+  relation: 'course_prerequisites'
+});
+
+function tableFor(kind) {
+  const table = entityTables[kind];
+  if (!table) throw new Error('INVALID_ENTITY');
+  return table;
+}
+
+export async function findDeletedEntity(executor, kind, id) {
+  return executor.query(`SELECT * FROM ${tableFor(kind)} WHERE id = $1 AND deleted_at IS NOT NULL`, [id]);
+}
+
+export async function findEntity(executor, kind, id) {
+  return executor.query(`SELECT * FROM ${tableFor(kind)} WHERE id = $1`, [id]);
+}
+
+export async function restoreEntity(executor, kind, id) {
+  return executor.query(`UPDATE ${tableFor(kind)}
+    SET deleted_at = NULL, deleted_by = NULL, delete_reason = NULL, updated_at = now()
+    WHERE id = $1`, [id]);
+}
+
+export async function listProgramCourseIdsForFaculty(executor, facultyId) {
+  return executor.query(`SELECT pc.id
+    FROM program_courses pc
+    JOIN programs p ON p.id = pc.program_id
+    WHERE p.faculty_id = $1`, [facultyId]);
+}
+
+export async function restoreProgramsForFaculty(executor, facultyId) {
+  return executor.query('UPDATE programs SET deleted_at = NULL, deleted_by = NULL, delete_reason = NULL, updated_at = now() WHERE faculty_id = $1', [facultyId]);
+}
+
+export async function restoreProgramCoursesForFaculty(executor, facultyId) {
+  return executor.query('UPDATE program_courses SET deleted_at = NULL, deleted_by = NULL, delete_reason = NULL, updated_at = now() WHERE program_id IN (SELECT id FROM programs WHERE faculty_id = $1)', [facultyId]);
+}
+
+export async function listProgramCourseIdsForProgram(executor, programId) {
+  return executor.query('SELECT id FROM program_courses WHERE program_id = $1', [programId]);
+}
+
+export async function restoreProgramCoursesForProgram(executor, programId) {
+  return executor.query('UPDATE program_courses SET deleted_at = NULL, deleted_by = NULL, delete_reason = NULL, updated_at = now() WHERE program_id = $1', [programId]);
+}
+
+export async function restorePrerequisitesForCourses(executor, courseIds) {
+  return executor.query('UPDATE course_prerequisites SET deleted_at = NULL, deleted_by = NULL, delete_reason = NULL, updated_at = now() WHERE course_id = ANY($1::bigint[]) OR prerequisite_course_id = ANY($1::bigint[])', [courseIds]);
+}
+
+export async function restorePrerequisitesForCourse(executor, courseId) {
+  return executor.query('UPDATE course_prerequisites SET deleted_at = NULL, deleted_by = NULL, delete_reason = NULL, updated_at = now() WHERE course_id = $1 OR prerequisite_course_id = $1', [courseId]);
+}
+
+export async function deleteEntity(executor, kind, id) {
+  return executor.query(`DELETE FROM ${tableFor(kind)} WHERE id = $1`, [id]);
+}
+
+export async function deleteProgramCourseAndOrphanCourse(executor, id, courseId) {
+  await executor.query('DELETE FROM program_courses WHERE id = $1', [id]);
+  return executor.query(`DELETE FROM courses c
+    WHERE c.id = $1
+      AND NOT EXISTS (SELECT 1 FROM program_courses pc WHERE pc.course_id = c.id)`, [courseId]);
+}
