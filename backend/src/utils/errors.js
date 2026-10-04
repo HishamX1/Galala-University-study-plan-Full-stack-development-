@@ -6,9 +6,25 @@ export class NotFoundError extends AppError { constructor(message = 'Not found')
 export class ConflictError extends AppError { constructor(message = 'Conflict') { super(message, 409, 'CONFLICT'); } }
 export class DatabaseError extends AppError { constructor() { super('The service is temporarily unavailable.', 503, 'DATABASE_ERROR'); } }
 
-export function toErrorResponse(error) {
+const SAFE_CLIENT_ERROR_PATTERNS = [
+  /^Password (?:is required|must )/,
+  /^Username must /,
+  /^That username is reserved\.$/,
+  /^Invalid (?:faculty name|facultyId|program name|durationYears|name|code|yearNo|semesterNo|credits|description|isRequired|prerequisiteCourseIds|prerequisiteCourseId|visibleToStudents|payload|avatar selection|reset-request decision|complaint status)$/,
+  /^You cannot /,
+  /^The last remaining Super Admin cannot be deleted\.$/,
+  /^This password reset (?:request has already been decided|link is invalid or has expired\.)$/,
+  /^Password reset request not found\.$/,
+  /^Unsupported (?:export|backup|import) format$/
+];
+
+export function isSafeClientError(error) {
+  return SAFE_CLIENT_ERROR_PATTERNS.some((pattern) => pattern.test(String(error?.message || '')));
+}
+
+export function toErrorResponse(error, requestId = null) {
   if (error?.message === 'PAYLOAD_TOO_LARGE') return { status: 413, body: { error: 'Request body is too large.', code: 'PAYLOAD_TOO_LARGE' } };
   if (error?.message === 'INVALID_JSON') return { status: 400, body: { error: 'Request body must be valid JSON.', code: 'INVALID_JSON' } };
   if (error instanceof AppError) return { status: error.status, body: { error: error.message, code: error.code } };
-  return { status: 500, body: { error: 'An unexpected error occurred.', code: 'INTERNAL_ERROR' } };
+  return { status: 500, body: { error: 'An unexpected error occurred.', code: 'INTERNAL_ERROR', ...(requestId ? { requestId } : {}) } };
 }

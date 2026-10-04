@@ -20,7 +20,7 @@ import { currentUser, createUser, deleteUser, listUsers, resetUserPassword, upda
 import { validatePassword } from '../services/passwordService.js';
 import { Permissions, hasPermission } from '../security/permissions.js';
 import { allowRequest } from '../security/rateLimiter.js';
-import { toErrorResponse } from '../utils/errors.js';
+import { isSafeClientError, toErrorResponse } from '../utils/errors.js';
 import { download, json, parseBody } from '../middleware/http.js';
 import { handleAuthRequest } from '../controllers/authController.js';
 import { handleCatalogReadRequest, handleCatalogRequest } from '../controllers/catalogController.js';
@@ -279,8 +279,8 @@ export async function handleApi(req, res, url) {
     if (String(error.message || '').startsWith('DB_')) return json(res, 503, { error: databaseDiagnosticMessage(error) });
     if (String(error.message || '').startsWith('FK_')) return json(res, 400, { error: 'Invalid relation id provided.' });
     if (error.code === '23505') return json(res, 409, { error: String(error.constraint || '').includes('student_id') ? 'Student ID is already in use.' : 'Email is already in use.' });
-    if (error.message && !/password hash|stored password/i.test(error.message)) return json(res, 400, { error: error.message });
-    const mapped = toErrorResponse(error);
+    if (isSafeClientError(error)) return json(res, 400, { error: error.message });
+    const mapped = toErrorResponse(error, req.requestId);
     return json(res, mapped.status, mapped.body);
   }
 }
