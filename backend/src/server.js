@@ -55,7 +55,7 @@ try {
 const server = http.createServer(async (req, res) => {
   const started = Date.now();
   assignRequestId(req, res);
-  applySecurityHeaders(res);
+  applySecurityHeaders(res, req);
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   const apiHandled = await handleApi(req, res, url);

@@ -17,6 +17,7 @@
     "test:recycle-bin": "node scripts/recycle-bin-regression-test.js",
     "test:admin-import": "node scripts/admin-import-security-test.js",
     "test:signup-rate-limit": "node scripts/signup-rate-limit-test.js",
+    "test:security-headers": "node scripts/security-headers-test.js",
     "test:foundation": "node scripts/security-foundation-test.js",
     "doctor": "node scripts/doctor.js",
     "smoke": "node scripts/smoke-test.js",
