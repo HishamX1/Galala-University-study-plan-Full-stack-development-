@@ -84,9 +84,14 @@ export async function handleApi(req, res, url) {
   if (!trustedStateChange(req)) return json(res, 403, { error: 'Origin validation failed' });
 
   const authSensitive = [`${env.apiBasePath}/auth/login`, `${env.apiBasePath}/auth/student-login`, `${env.apiBasePath}/auth/admin-login`, `${env.apiBasePath}/auth/password-reset-requests`];
+  const signupPath = `${env.apiBasePath}/auth/student-signup`;
+  const client = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
+  const rateLimitResponse = (retryAfter = '60') => json(res, 429, { error: 'Too many requests. Please try again shortly.' }, { 'Retry-After': retryAfter });
+  if (req.method === 'POST' && url.pathname === signupPath && !allowRequest(`${url.pathname}:${client}`, { limit: 5, windowMs: 15 * 60_000 })) {
+    return rateLimitResponse('900');
+  }
   if (req.method === 'POST' && authSensitive.includes(url.pathname)) {
-    const client = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
-    if (!allowRequest(`${url.pathname}:${client}`, { limit: 10, windowMs: 60_000 })) return json(res, 429, { error: 'Too many requests. Please try again shortly.' }, { 'Retry-After': '60' });
+    if (!allowRequest(`${url.pathname}:${client}`, { limit: 10, windowMs: 60_000 })) return rateLimitResponse();
   }
 
   try {
