@@ -19,6 +19,7 @@
     "test:student-catalog-xss": "node scripts/student-catalog-xss-test.js",
     "test:signup-rate-limit": "node scripts/signup-rate-limit-test.js",
     "test:security-headers": "node scripts/security-headers-test.js",
+    "test:api-config": "node scripts/api-config-test.js",
     "test:error-disclosure": "node scripts/error-disclosure-test.js",
     "test:foundation": "node scripts/security-foundation-test.js",
     "doctor": "node scripts/doctor.js",

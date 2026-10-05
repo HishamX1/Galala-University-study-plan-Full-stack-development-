@@ -1,4 +1,5 @@
 const API_STORAGE_KEY = 'guApiBase';
+const DEPLOYED_API_BASE = 'https://galala-university-study-plan-full-stack-kd69.onrender.com/api';
 
 export function normalizeApiBase(value) {
   const trimmed = String(value || '').trim().replace(/\/$/, '');
@@ -25,13 +26,16 @@ export function getApiCandidates() {
   const candidates = [];
   if (configured) candidates.push(configured);
 
-  const isBackendOrigin = window.location.origin.includes('localhost:4000') ||
-    window.location.origin.includes('127.0.0.1:4000');
+  const isLocalHost = window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1';
+  const isBackendOrigin = isLocalHost && window.location.port === '4000';
 
   if (isBackendOrigin) {
     candidates.push('/api');
+  } else if (isLocalHost) {
+    candidates.push(`http://${window.location.hostname}:4000/api`);
   } else if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
-    candidates.push(`${window.location.origin}/api`);
+    candidates.push(DEPLOYED_API_BASE);
   }
 
   if (window.location.protocol !== 'https:') {
