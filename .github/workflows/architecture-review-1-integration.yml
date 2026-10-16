@@ -1,0 +1,86 @@
+name: Architecture Review 1 integration tests
+
+on:
+  push:
+    branches:
+      - architecture-review-1-unverified
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: gu_pt_phase1_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d gu_pt_phase1_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      PG_SSL: "false"
+      TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/gu_pt_phase1_test
+      ALLOW_DESTRUCTIVE_TEST_DB: I_CONFIRM_DISPOSABLE_LOCAL_DATABASE
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/gu_pt_phase1_test
+
+    steps:
+      - name: Check out review branch
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Apply canonical migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r migration; do
+            echo "Applying ${migration}"
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
+          done < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -print | sort)
+
+      - name: Seed canonical catalog fixtures
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/seed.sql
+
+      - name: Run static and database-free regressions
+        run: >-
+          npm run check &&
+          npm run test:db-guard &&
+          npm run test:refresh-rollback &&
+          npm run test:admin-routes &&
+          npm run test:admin-ops-repositories &&
+          npm run test:admin-import &&
+          npm run test:student-catalog-xss &&
+          npm run test:signup-rate-limit &&
+          npm run test:security-headers &&
+          npm run test:api-config &&
+          npm run test:error-disclosure &&
+          npm run test:foundation &&
+          npm run test:dashboard
+
+      - name: Run PostgreSQL-backed integration regressions
+        run: >-
+          npm run test:auth &&
+          npm run test:session &&
+          npm run test:student-portal &&
+          npm run test:recycle-bin
