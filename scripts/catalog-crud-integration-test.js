@@ -32,6 +32,8 @@ const programName = `AR1 Program ${suffix}`;
 const updatedProgramName = `AR1 Program Updated ${suffix}`;
 const courseNames = [`AR1 Course A ${suffix}`, `AR1 Course B ${suffix}`, `AR1 Course C ${suffix}`];
 const courseCodes = [`AR1A${suffix}`, `AR1B${suffix}`, `AR1C${suffix}`];
+const failedCourseName = `AR1 Course Failed Create ${suffix}`;
+const failedCourseCode = `AR1X${suffix}`;
 const fixture = { facultyId: null, programId: null, programCourseIds: [], courseIds: [], relationIds: [] };
 const triggerNames = [];
 const functionNames = [];
@@ -77,6 +79,17 @@ try {
   fixture.programId = program.id;
   assert.equal((await updateProgram(program.id, { name: updatedProgramName })).name, updatedProgramName);
   assert.ok((await getPrograms(faculty.id)).some((item) => item.id === program.id && item.name === updatedProgramName));
+
+  await assert.rejects(() => createProgramCourse({
+    programId: program.id, name: failedCourseName, code: failedCourseCode, yearNo: 1, semesterNo: 3,
+    credits: 1, isRequired: false, description: null, prerequisiteCourseIds: [Number.MAX_SAFE_INTEGER]
+  }), (error) => error.code === '23503');
+  assert.equal(await count('SELECT count(*)::int AS count FROM courses WHERE name = $1', [failedCourseName]), 0,
+    'failed multi-write course creation must roll back the shared course insert');
+  assert.equal(await count('SELECT count(*)::int AS count FROM program_courses WHERE code = $1', [failedCourseCode]), 0,
+    'failed multi-write course creation must roll back its program-course insert');
+  assert.equal(await count("SELECT count(*)::int AS count FROM admin_audit_logs WHERE entity = 'course' AND new_values->>'code' = $1", [failedCourseCode]), 0,
+    'failed course creation must not write an audit event');
 
   const first = await createProgramCourse({
     programId: program.id, name: courseNames[0], code: courseCodes[0], yearNo: 1, semesterNo: 1,
@@ -174,9 +187,10 @@ try {
   }
   if (fixture.facultyId || fixture.programId || fixture.programCourseIds.length || fixture.courseIds.length) {
     const programCourseRows = await query(`SELECT id, course_id FROM program_courses
-      WHERE id = ANY($1::bigint[]) OR code = ANY($2::text[])`, [fixture.programCourseIds, courseCodes]).then((result) => result.rows).catch(() => []);
+      WHERE id = ANY($1::bigint[]) OR code = ANY($2::text[])`, [fixture.programCourseIds, [...courseCodes, failedCourseCode]]).then((result) => result.rows).catch(() => []);
     const programCourseIds = [...new Set([...fixture.programCourseIds, ...programCourseRows.map((row) => Number(row.id))])];
-    const courseIds = [...new Set([...fixture.courseIds, ...programCourseRows.map((row) => Number(row.course_id))])];
+    const courseRows = await query('SELECT id FROM courses WHERE id = ANY($1::bigint[]) OR name = ANY($2::text[])', [fixture.courseIds, [...courseNames, failedCourseName]]).then((result) => result.rows).catch(() => []);
+    const courseIds = [...new Set([...fixture.courseIds, ...programCourseRows.map((row) => Number(row.course_id)), ...courseRows.map((row) => Number(row.id))])];
     const facultyIds = fixture.facultyId ? [fixture.facultyId] : [];
     const programIds = fixture.programId ? [fixture.programId] : [];
     await query(`DELETE FROM admin_audit_logs
