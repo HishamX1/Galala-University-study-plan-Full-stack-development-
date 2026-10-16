@@ -1,29 +1,16 @@
 import { getCatalog, getFaculties, getProgramCourses, getPrograms } from '../services/catalogService.js';
-import {
-  createBackup,
-  exportCatalog,
-  getAuditLogs,
-  getBackupDownload,
-  getBackups,
-  getDashboardSummary,
-  getRecycleBin,
-  getSystemHealth,
-  importCatalog,
-  permanentlyDeleteRecycleItem,
-  restoreRecycleItem,
-  validateImport
-} from '../services/adminOpsService.js';
-import { validateEntityId } from '../validation/schemas.js';
 import { env } from '../config/env.js';
 import { databaseDiagnosticMessage } from '../db/client.js';
-import { currentUser, createUser, deleteUser, listUsers, resetUserPassword, updateUser, countSuperAdmins, listPasswordResetRequests, decidePasswordResetRequest, createComplaint, listComplaints, updateComplaint, createCommunication, listCommunications, getDashboardData, updateOwnProfile } from '../services/authService.js';
-import { validatePassword } from '../services/passwordService.js';
+import { currentUser } from '../services/authService.js';
 import { Permissions, hasPermission } from '../security/permissions.js';
 import { allowRequest } from '../security/rateLimiter.js';
 import { isSafeClientError, toErrorResponse } from '../utils/errors.js';
-import { download, json, parseBody } from '../middleware/http.js';
+import { json } from '../middleware/http.js';
 import { handleAuthRequest } from '../controllers/authController.js';
 import { handleCatalogReadRequest, handleCatalogRequest } from '../controllers/catalogController.js';
+import { handleDashboardRequest } from '../controllers/dashboardController.js';
+import { handleAdminSupportRequest, handleAdminUserRequest } from '../controllers/adminUserController.js';
+import { handleAdminOperationsRequest } from '../controllers/adminOperationsController.js';
 
 function isAllowedCorsOrigin(origin) {
   return Boolean(origin) && env.corsOrigins.includes(origin);
@@ -68,13 +55,7 @@ function trustedStateChange(req) {
   return isAllowedCorsOrigin(req.headers.origin);
 }
 
-function toNumber(value) {
-  if (value === undefined || value === null || value === '') return undefined;
-  const n = Number(value);
-  return Number.isInteger(n) ? n : undefined;
-}
-
-export async function handleApi(req, res, url) {
+export async function handleApi(req, res, url, { resolveCurrentUser = currentUser } = {}) {
   if (!url.pathname.startsWith(env.apiBasePath)) return false;
   const origin = req.headers.origin;
   if (origin && !applyCorsHeaders(req, res)) {
@@ -97,25 +78,19 @@ export async function handleApi(req, res, url) {
   try {
     if (await handleAuthRequest(req, res, url)) return true;
 
-    const user = await currentUser(req);
+    const user = await resolveCurrentUser(req);
     if (!user) return unauthorized(res);
     if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/dashboard`) {
       if (!requirePermission(res, user, Permissions.dashboardRead)) return;
-      const dashboard = await getDashboardData(user);
-      if (user.role !== 'student') dashboard.catalog = await getDashboardSummary();
-      if (hasPermission(user, Permissions.systemRead)) dashboard.systemHealth = await getSystemHealth();
-      return json(res, 200, dashboard);
+      return handleDashboardRequest(req, res, url, user);
     }
     if (req.method === 'PUT' && url.pathname === `${env.apiBasePath}/profile`) {
       if (!requirePermission(res, user, Permissions.profileWrite)) return;
-      const body = await parseBody(req);
-      return json(res, 200, { user: await updateOwnProfile(user.id, body) });
+      return handleDashboardRequest(req, res, url, user);
     }
     if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/student/complaints`) {
       if (user.role !== 'student' || !requirePermission(res, user, Permissions.studentComplaintCreate)) return;
-      const body = await parseBody(req);
-      if (!String(body.message || '').trim()) return json(res, 400, { error: 'A complaint message is required.' });
-      return json(res, 201, { complaint: await createComplaint(user, String(body.message).trim()) });
+      return handleDashboardRequest(req, res, url, user);
     }
     if (url.pathname.startsWith(`${env.apiBasePath}/admin/password-reset-requests`)) {
       if (!requirePermission(res, user, Permissions.recoveryManage)) return;
@@ -123,149 +98,67 @@ export async function handleApi(req, res, url) {
     if (url.pathname.startsWith(`${env.apiBasePath}/admin/complaints`) || url.pathname.startsWith(`${env.apiBasePath}/admin/communications`)) {
       if (!requirePermission(res, user, Permissions.complaintsManage)) return;
     }
-    if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/password-reset-requests`) return json(res, 200, { requests: await listPasswordResetRequests() });
-    if (req.method === 'POST' && url.pathname.match(new RegExp(`^${env.apiBasePath}/admin/password-reset-requests/[^/]+/(approve|reject)$`))) {
-      const body = await parseBody(req); const parts = url.pathname.split('/');
-      const result = await decidePasswordResetRequest(parts.at(-2), parts.at(-1), user.id, body.note);
-      return json(res, 200, { request: result });
-    }
-    if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/complaints`) return json(res, 200, { complaints: await listComplaints() });
-    if (req.method === 'PUT' && url.pathname.match(new RegExp(`^${env.apiBasePath}/admin/complaints/[^/]+$`))) {
-      const body = await parseBody(req); return json(res, 200, { complaint: await updateComplaint(url.pathname.split('/').at(-1), body.status, body.reply, user.id) });
-    }
-    if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/communications`) return json(res, 200, { communications: await listCommunications() });
-    if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/admin/communications`) {
-      const body = await parseBody(req);
-      if (!body.recipientId || !String(body.message || '').trim()) return json(res, 400, { error: 'Recipient and message are required.' });
-      return json(res, 201, { communication: await createCommunication(body.recipientId, String(body.message).trim(), user.id) });
-    }
+    if (await handleAdminSupportRequest(req, res, url, user)) return true;
     if (url.pathname === `${env.apiBasePath}/admin/users` || url.pathname.startsWith(`${env.apiBasePath}/admin/users/`)) {
       const permission = req.method === 'GET' ? Permissions.usersRead : req.method === 'DELETE' ? Permissions.usersDelete : Permissions.usersWrite;
       if (!requirePermission(res, user, permission)) return;
     }
     if (!canAccess(user, req, url.pathname)) return forbidden(res);
-    if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/users`) return json(res, 200, { users: await listUsers() });
-    if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/admin/users`) {
-      const body = await parseBody(req);
-      if (!body.name || !body.email || !body.password || !['student','regular_admin','super_admin'].includes(body.role)) return json(res, 400, { error: 'Name, email, password, and a valid role are required' });
-      return json(res, 201, { user: await createUser(body) });
-    }
-    if (req.method === 'PUT' && url.pathname.match(new RegExp(`^${env.apiBasePath}/admin/users/[^/]+$`))) {
-      const body = await parseBody(req); const id = url.pathname.split('/').at(-1);
-      if (!body.name || !body.email || !['student','regular_admin','super_admin'].includes(body.role) || !['active','inactive','suspended'].includes(body.status)) return json(res, 400, { error: 'Invalid user data' });
-      if (id === user.id) return json(res, 400, { error: 'You cannot edit your own account from User Management.' });
-      if (body.role !== 'super_admin' && (await listUsers()).filter((item) => item.role === 'super_admin').length === 1) {
-        const target = (await listUsers()).find((item) => item.id === id);
-        if (target?.role === 'super_admin') return json(res, 400, { error: 'At least one Super Admin must remain.' });
-      }
-      const updated = await updateUser(id, body); return updated ? json(res, 200, { user: updated }) : json(res, 404, { error: 'User not found' });
-    }
-    if (req.method === 'POST' && url.pathname.match(new RegExp(`^${env.apiBasePath}/admin/users/[^/]+/reset-password$`))) {
-      const body = await parseBody(req); const id = url.pathname.split('/').at(-2);
-      if (!body.password || body.password !== body.confirmPassword) return json(res, 400, { error: 'Passwords must match.' });
-      const passwordError = validatePassword(body.password); if (passwordError) return json(res, 400, { error: passwordError });
-      return json(res, 200, { user: await resetUserPassword(id, body.password) });
-    }
-    if (req.method === 'DELETE' && url.pathname.match(new RegExp(`^${env.apiBasePath}/admin/users/[^/]+$`))) {
-      const id = url.pathname.split('/').at(-1);
-      if (id === user.id) return json(res, 400, { error: 'You cannot delete the currently signed-in user.' });
-      const target = (await listUsers()).find((item) => item.id === id);
-      if (!target) return json(res, 404, { error: 'User not found' });
-      if (target.role === 'super_admin' && await countSuperAdmins() <= 1) return json(res, 400, { error: 'The last remaining Super Admin cannot be deleted.' });
-      await deleteUser(id); return json(res, 200, { deleted: true });
-    }
+    if (await handleAdminUserRequest(req, res, url, user)) return true;
     if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/health`) {
       return json(res, 200, { status: 'ok', mode: 'postgres', schema: 'canonical' });
     }
 
     if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/dashboard`) {
       if (!requirePermission(res, user, Permissions.dashboardRead)) return;
-      return json(res, 200, await getDashboardSummary());
+      return handleDashboardRequest(req, res, url, user);
     }
 
     if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/audit-logs`) {
       if (!requirePermission(res, user, Permissions.auditRead)) return;
-      return json(res, 200, await getAuditLogs({
-        range: url.searchParams.get('range') || '',
-        entity: url.searchParams.get('entity') || '',
-        action: url.searchParams.get('action') || '',
-        search: url.searchParams.get('search') || '',
-        order: url.searchParams.get('order') || 'newest'
-      }));
     }
 
     if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/recycle-bin`) {
       if (user.role !== 'super_admin') return forbidden(res);
-      return json(res, 200, await getRecycleBin());
     }
 
     if (req.method === 'POST' && url.pathname.match(new RegExp(`^${env.apiBasePath}/admin/recycle-bin/[^/]+/\\d+/restore$`))) {
       if (user.role !== 'super_admin') return forbidden(res);
-      const parts = url.pathname.split('/');
-      const kind = parts.at(-3);
-      const id = toNumber(parts.at(-2));
-      const idErr = validateEntityId(id, `${kind} id`);
-      if (idErr) return json(res, 400, { error: idErr });
-      const restored = await restoreRecycleItem(kind, id);
-      if (!restored) return json(res, 404, { error: 'Recycle bin item not found' });
-      return json(res, 200, { restored: true, kind, id });
     }
 
     if (req.method === 'DELETE' && url.pathname.match(new RegExp(`^${env.apiBasePath}/admin/recycle-bin/[^/]+/\\d+$`))) {
       if (user.role !== 'super_admin') return forbidden(res);
-      const parts = url.pathname.split('/');
-      const kind = parts.at(-2);
-      const id = toNumber(parts.at(-1));
-      const idErr = validateEntityId(id, `${kind} id`);
-      if (idErr) return json(res, 400, { error: idErr });
-      const deleted = await permanentlyDeleteRecycleItem(kind, id);
-      if (!deleted) return json(res, 404, { error: 'Recycle bin item not found' });
-      return json(res, 200, { deleted: true, kind, id });
     }
 
     if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/admin/import/validate`) {
       if (!requirePermission(res, user, Permissions.catalogImport)) return;
-      const body = await parseBody(req, 8 * 1024 * 1024);
-      return json(res, 200, await validateImport(body));
     }
 
     if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/admin/import`) {
       if (!requirePermission(res, user, Permissions.catalogImport)) return;
-      const body = await parseBody(req, 8 * 1024 * 1024);
-      const result = await importCatalog(body);
-      return json(res, result.valid ? 201 : 400, result);
     }
 
     if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/export`) {
       if (!requirePermission(res, user, Permissions.catalogExport)) return;
-      return download(res, await exportCatalog(url.searchParams.get('format') || 'json'));
     }
 
     if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/backups`) {
       if (!requirePermission(res, user, Permissions.backupRun)) return;
-      return json(res, 200, await getBackups());
     }
 
     if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/admin/backups`) {
       if (!requirePermission(res, user, Permissions.backupRun)) return;
-      const body = await parseBody(req);
-      return json(res, 201, await createBackup(body.format || 'json'));
     }
 
     if (req.method === 'GET' && url.pathname.match(new RegExp(`^${env.apiBasePath}/admin/backups/\\d+/download$`))) {
       if (!requirePermission(res, user, Permissions.backupRun)) return;
-      const id = toNumber(url.pathname.split('/').at(-2));
-      const idErr = validateEntityId(id, 'backup id');
-      if (idErr) return json(res, 400, { error: idErr });
-      const backup = await getBackupDownload(id);
-      if (!backup) return json(res, 404, { error: 'Backup not found' });
-      return download(res, backup);
     }
 
     if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/system-health`) {
       if (!requirePermission(res, user, Permissions.systemRead)) return;
-      return json(res, 200, await getSystemHealth());
     }
+
+    if (await handleAdminOperationsRequest(req, res, url, user)) return true;
 
     if (await handleCatalogReadRequest(req, res, url)) return true;
     if (await handleCatalogRequest(req, res, url)) return true;

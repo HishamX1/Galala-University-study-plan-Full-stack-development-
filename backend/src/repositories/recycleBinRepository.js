@@ -36,10 +36,6 @@ export async function findDeletedEntity(executor, kind, id) {
   return executor.query(`SELECT * FROM ${tableFor(kind)} WHERE id = $1 AND deleted_at IS NOT NULL`, [id]);
 }
 
-export async function findEntity(executor, kind, id) {
-  return executor.query(`SELECT * FROM ${tableFor(kind)} WHERE id = $1`, [id]);
-}
-
 export async function restoreEntity(executor, kind, id) {
   return executor.query(`UPDATE ${tableFor(kind)}
     SET deleted_at = NULL, deleted_by = NULL, delete_reason = NULL, updated_at = now()

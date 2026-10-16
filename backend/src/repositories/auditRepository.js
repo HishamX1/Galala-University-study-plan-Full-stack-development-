@@ -25,3 +25,23 @@ export async function listAuditLogs(executor, filters = {}) {
     params
   );
 }
+
+export async function countTodayAuditEvents(executor) {
+  return executor.query("SELECT count(*)::int AS count FROM admin_audit_logs WHERE created_at >= date_trunc('day', now())");
+}
+
+export async function listRecentAuditEvents(executor) {
+  return executor.query(
+    `SELECT id, created_at, action, entity, entity_id, description
+       FROM admin_audit_logs
+      ORDER BY created_at DESC
+      LIMIT 8`
+  );
+}
+
+export async function findLatestAuditEvent(executor, actionPrefix) {
+  return executor.query(
+    'SELECT created_at FROM admin_audit_logs WHERE action ILIKE $1 ORDER BY created_at DESC LIMIT 1',
+    [`${actionPrefix}%`]
+  );
+}

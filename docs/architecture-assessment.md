@@ -8,8 +8,8 @@ The canonical academic catalog is `faculties`, `programs`, `courses`, `program_c
 
 ## Findings and risks
 
-- `catalogRoutes.js` is an oversized HTTP/router module and historically mixed routing, CORS, authorization, parsing, and error mapping.
-- Catalog, user, session, recovery, and notification persistence are repository-backed. `adminOpsService.js` remains a legacy SQL-heavy service and the catalog route remains an incremental controller-extraction candidate.
+- `catalogRoutes.js` retains the HTTP dispatch, security middleware, permission gates, and shared error mapping; controller-backed endpoint groups are covered by focused compatibility checks.
+- Catalog, user, session, recovery, notification, audit, backup, recycle-bin, and admin catalog persistence is repository-backed. Admin services retain domain decisions, multi-repository orchestration, and service-owned transaction control.
 - Existing persisted roles are `student`, `regular_admin`, and `super_admin`; the project brief's `admin` label must remain an alias in documentation rather than a data migration.
 - Import currently validates and then writes to production tables. It has no staging/approval boundary.
 - Administrative catalog updates are transactional in several paths, but most updates are last-write-wins; no general version field exists.
@@ -26,8 +26,8 @@ Cross-cutting modules live in `config`, `middleware`, `security`, `validation`, 
 
 1. Completed: extract catalog read/write operations into the five academic repositories without changing API contracts.
 2. Completed: extract user/session/recovery/notification query groups from `authService` into repositories.
-3. Partial: authentication is controller-backed; split the remaining legacy route file into dashboard, admin, and catalog controllers behind compatibility tests.
-4. Add repository/service contract tests and a disposable test database.
+3. Completed: authentication, catalog, dashboard/profile/student actions, admin user/support operations, and admin catalog operations are controller-backed. The route module retains CORS, Origin/CSRF checks, rate limiting, user resolution, permission gates, dispatch ordering, and shared error mapping. Focused route/controller compatibility tests cover response behavior, handler completion, and middleware ordering.
+4. In progress: add repository/service contract tests and verify integration behavior against a disposable test database. Database-backed verification is blocked in the current environment; the isolated setup procedure is documented in `docs/supabase-setup.md`.
 5. Introduce explicit optimistic versions only after UI conflict handling is designed.
 
 ## Security foundation delivered
@@ -39,4 +39,13 @@ Cross-cutting modules live in `config`, `middleware`, `security`, `validation`, 
 
 ## Known limitations
 
-The in-process limiter is per backend instance; replace it with shared storage before horizontal scaling. Catalog services retain only `BEGIN`/`COMMIT`/`ROLLBACK` statements for transaction orchestration; all catalog persistence SQL is in repositories. The legacy route module and `adminOpsService` remain the next extraction candidates. Existing production data was not modified.
+The in-process limiter is per backend instance; replace it with shared storage before horizontal scaling. Catalog and admin operations services retain transaction control and domain orchestration while persistence SQL is held in repositories. Admin dashboard and system-health reads use the audit, backup, and catalog repositories; the migration version is service metadata rather than a database query. Backup creation, import, restore, and permanent deletion use service-owned transactions, passing the same executor to participating repositories. Permanent recycle-bin deletion requires the target row to be soft-deleted.
+
+### Phase 1 verification status
+
+- **Implemented and verified without PostgreSQL:** route/controller compatibility (`npm run test:admin-routes`), admin repository query delegation (`npm run test:admin-ops-repositories`), import parser/security behavior (`npm run test:admin-import`), security foundation (`npm run test:foundation`), dashboard static contract (`npm run test:dashboard`), refresh rollback unit simulation (`npm run test:refresh-rollback`), and syntax checks (`npm run check`). These are not substitutes for DB integration tests.
+- **Implemented but not integration-verified:** repository/service behavior against PostgreSQL, catalog CRUD and executor propagation, auth/session lifecycle, student catalog behavior against real catalog data, recycle-bin restore/cascade/permanent deletion, import rollback, backup creation/audit atomicity, and audit-failure rollback.
+- **Blocked by environment:** `npm run doctor` cannot connect. A sanitized direct PostgreSQL connection attempt reports `EACCES` while connecting to the configured Supabase pooler on port 5432; this environment exposes no `psql`, `pg_isready`, Docker/Podman command, or PostgreSQL service. The configured endpoint is not isolated, so destructive fixture tests were not run against it. `npm run test:auth`, `npm run test:session`, and `npm run test:recycle-bin` were attempted and each failed before completing because the sandbox denied database socket access.
+- **Incomplete:** a disposable local/test database run of the full database-dependent suite and service-level rollback/audit-failure assertions. See `docs/supabase-setup.md` for a reproducible local-only setup and command sequence.
+
+No production data was intentionally modified. No schema or API changes were made for verification.
