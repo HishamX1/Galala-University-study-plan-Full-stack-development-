@@ -208,8 +208,10 @@
             <label>File (for Excel or PDF)</label><input id="importFile" type="file" accept=".xlsx,.csv,.pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,application/pdf" />
             <label>Content</label><textarea id="importContent" rows="10" placeholder='[{"name":"Faculty of Engineering"}]'></textarea>
             <button type="button" id="validateImport">Validate</button>
-            <button type="button" id="runImport">Import</button>
+            <button type="button" id="stageImport">Stage for Review</button>
             <div id="importPreview" class="import-preview"></div>
+            <h4>My Staged Imports</h4>
+            <div id="importStages" class="import-stages"></div>
           </div>
           <div>
             <h3>Bulk Export</h3>

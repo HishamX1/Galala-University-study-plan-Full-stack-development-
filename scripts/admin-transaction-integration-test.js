@@ -5,7 +5,8 @@ import { requireIsolatedTestDatabase } from './helpers/require-isolated-test-dat
 requireIsolatedTestDatabase();
 
 const { closePool, query } = await import('../backend/src/db/client.js');
-const { createBackup, importCatalog } = await import('../backend/src/services/adminOpsService.js');
+const { createUser } = await import('../backend/src/services/authService.js');
+const { createBackup, createImportStage, publishImportStage } = await import('../backend/src/services/adminOpsService.js');
 const suffix = crypto.randomUUID().replaceAll('-', '');
 const partialFaculty = `Arch Phase 1 rollback ${suffix}`;
 const failingFaculty = `Arch Phase 1 injected failure ${suffix}`;
@@ -14,6 +15,8 @@ const auditTrigger = `phase1_fail_audit_trigger_${suffix}`;
 const facultyFunction = `phase1_fail_faculty_${suffix}`;
 const facultyTrigger = `phase1_fail_faculty_trigger_${suffix}`;
 let backupId;
+let importerId;
+let stageId;
 
 async function count(sql, params = []) {
   return Number((await query(sql, params)).rows[0].count);
@@ -45,6 +48,17 @@ try {
     'backup insert must roll back when its audit insert fails');
 
   const importedAuditCountBefore = await count("SELECT count(*)::int AS count FROM admin_audit_logs WHERE action = 'Imported faculties'");
+  const importer = await createUser({
+    name: 'Admin Transaction Test', email: `admin-transaction-${suffix}@example.test`,
+    password: 'Transaction-Test-Password-123!', role: 'regular_admin'
+  });
+  importerId = importer.id;
+  const stage = await createImportStage({
+    type: 'faculties',
+    format: 'json',
+    content: JSON.stringify([{ name: partialFaculty }, { name: failingFaculty }])
+  }, importer);
+  stageId = stage.id;
   await query(`CREATE FUNCTION public."${facultyFunction}"() RETURNS trigger LANGUAGE plpgsql AS $phase1$
     BEGIN
       IF NEW.name = '${failingFaculty}' THEN
@@ -55,17 +69,15 @@ try {
   $phase1$`);
   await query(`CREATE TRIGGER "${facultyTrigger}" BEFORE INSERT ON public.faculties
     FOR EACH ROW EXECUTE FUNCTION public."${facultyFunction}"()`);
-  await assert.rejects(() => importCatalog({
-    type: 'faculties',
-    format: 'json',
-    content: JSON.stringify([{ name: partialFaculty }, { name: failingFaculty }])
-  }), /injected faculty insert failure/);
+  await assert.rejects(() => publishImportStage(stage.id, importer.id, stage.previewVersion, importer), /injected faculty insert failure/);
   await query(`DROP TRIGGER "${facultyTrigger}" ON public.faculties`);
   await query(`DROP FUNCTION public."${facultyFunction}"()`);
   assert.equal(await count('SELECT count(*)::int AS count FROM faculties WHERE name = ANY($1::text[])', [[partialFaculty, failingFaculty]]), 0,
     'earlier catalog rows must roll back after a later import insert fails');
   assert.equal(await count("SELECT count(*)::int AS count FROM admin_audit_logs WHERE action = 'Imported faculties'"), importedAuditCountBefore,
     'failed import must not write its audit event');
+  assert.equal((await query('SELECT status FROM catalog_import_stages WHERE id = $1', [stage.id])).rows[0].status, 'staged',
+    'failed staged import remains available for retry');
 
   console.log('Admin backup/audit atomicity and import-failure rollback integration tests passed.');
 } finally {
@@ -77,5 +89,7 @@ try {
     await query("DELETE FROM admin_audit_logs WHERE entity = 'backup' AND entity_id = $1 AND action = 'Database Backup'", [backupId]).catch(() => {});
     await query('DELETE FROM admin_backup_history WHERE id = $1', [backupId]).catch(() => {});
   }
+  if (stageId) await query("DELETE FROM admin_audit_logs WHERE entity = 'catalog_import_stage' AND new_values->>'stageId' = $1", [stageId]).catch(() => {});
+  if (importerId) await query('DELETE FROM app_users WHERE id = $1', [importerId]).catch(() => {});
   await closePool();
 }

@@ -20,7 +20,7 @@ The adapter owns vendor authentication, polling/webhooks, retries, source identi
 
 ## Import target
 
-Catalog imports will evolve to `upload -> staging -> validation -> preview -> approval -> publication`. Staging will preserve source row errors and an approval audit trail. The current direct-write importer remains a documented operational risk; it is not silently changed in Phase 1.
+Catalog imports now use `upload -> staging -> validation -> preview -> same-administrator confirmation -> publication`. The implementation stores parsed rows for 24 hours, revalidates the preview against the active catalog, and requires fresh confirmation after a material validation-context change. It does not introduce second-person approval. See `docs/catalog-import-staging.md` for API, limits, transaction, and migration details.
 
 ## Notifications
 

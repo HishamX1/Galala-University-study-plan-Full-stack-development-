@@ -1,10 +1,13 @@
+import crypto from 'node:crypto';
 import { query, withPostgresClient } from '../db/client.js';
 import ExcelJS from 'exceljs';
 import { parseXlsxInWorker, XLSX_PARSER_LIMITS } from './xlsxImportParser.js';
 import { countTodayAuditEvents, findLatestAuditEvent, insertAuditLog, listAuditLogs, listRecentAuditEvents } from '../repositories/auditRepository.js';
 import { findBackupSnapshot, findLatestBackupCreatedAt, insertBackup, listBackups } from '../repositories/backupRepository.js';
 import { countActiveCatalogEntities, countDeletedCatalogEntities, insertImportedRow, readCatalogSnapshot, readImportReferences } from '../repositories/adminCatalogRepository.js';
+import { cancelCatalogImportStage, countActiveCatalogImportStages, deleteExpiredCatalogImportStages, findCatalogImportStageForOwner, insertCatalogImportStage, listCatalogImportStagesForOwner, lockCatalogImportStageOwner, markCatalogImportStagePublished, refreshCatalogImportStagePreview } from '../repositories/catalogImportStageRepository.js';
 import { deleteEntity, deleteProgramCourseAndOrphanCourse, findDeletedEntity, listDeletedCatalog, listProgramCourseIdsForFaculty, listProgramCourseIdsForProgram, restoreEntity, restorePrerequisitesForCourse, restorePrerequisitesForCourses, restoreProgramCoursesForFaculty, restoreProgramCoursesForProgram, restoreProgramsForFaculty } from '../repositories/recycleBinRepository.js';
+import { AppError, ConflictError, NotFoundError } from '../utils/errors.js';
 
 const ENTITY_TABLES = {
   faculty: 'faculties',
@@ -20,7 +23,11 @@ export const IMPORT_LIMITS = Object.freeze({
   maxWorksheets: 1,
   maxRows: 10_000,
   maxColumns: 100,
-  maxCells: 100_000
+  maxCells: 100_000,
+  maxStoredBytes: 8 * 1024 * 1024,
+  maxValidationErrors: 500,
+  maxActiveStagesPerAdmin: 5,
+  stageTtlHours: 24
 });
 
 function toInt(value) {
@@ -391,39 +398,75 @@ export async function getBackupDownload(id) {
   };
 }
 
-export async function validateImport({ type, format = 'json', content }) {
-  if (!['faculties', 'programs', 'programCourses', 'relationships'].includes(type)) return { valid: false, count: 0, errors: [{ line: 0, error: 'Unsupported import type' }], rows: [] };
-  if (!['json', 'csv', 'xlsx', 'pdf'].includes(format)) return { valid: false, count: 0, errors: [{ line: 0, error: 'Unsupported import format' }], rows: [] };
-  let rows;
-  try { rows = await importRows(arguments[0]); } catch (error) { return { valid: false, count: 0, errors: [{ line: 0, error: error.message || 'Invalid import file' }], rows: [] }; }
-  const list = Array.isArray(rows) ? rows : rows[type] || [];
-  if (!Array.isArray(list) || !list.length) return { valid: false, count: 0, errors: [{ line: 0, error: 'Import contains no rows' }], rows: [] };
+function validationFailure(error) {
+  return { valid: false, count: 0, errors: [{ line: 0, error }], rows: [] };
+}
+
+function addImportError(errors, line, error, maxErrors = Infinity) {
+  if (errors.length < maxErrors) errors.push({ line, error });
+  else errors.truncated = true;
+}
+
+function referenceFingerprint(references) {
+  const stable = references.map((result) => result.rows
+    .slice()
+    .sort((left, right) => Number(left.id) - Number(right.id)));
+  return crypto.createHash('sha256').update(JSON.stringify(stable)).digest('hex');
+}
+
+function importPreviewFingerprint(rows, validation, referencesHash) {
+  return crypto.createHash('sha256').update(JSON.stringify({
+    rows,
+    valid: validation.valid,
+    count: validation.count,
+    errors: validation.errors,
+    referencesHash
+  })).digest('hex');
+}
+
+function validateParsedRows(list) {
+  if (!Array.isArray(list) || !list.length) return validationFailure('Import contains no rows');
+  if (list.length > IMPORT_LIMITS.maxRows) return validationFailure(`Import exceeds the ${IMPORT_LIMITS.maxRows} row limit`);
+  let cellCount = 0;
+  for (const [index, row] of list.entries()) {
+    const columns = row && typeof row === 'object' && !Array.isArray(row) ? Object.keys(row).length : 0;
+    if (columns > IMPORT_LIMITS.maxColumns) return validationFailure(`Row ${index + 1} exceeds the ${IMPORT_LIMITS.maxColumns} column limit`);
+    cellCount += columns;
+    if (cellCount > IMPORT_LIMITS.maxCells) return validationFailure(`Import exceeds the ${IMPORT_LIMITS.maxCells} cell limit`);
+  }
+  return null;
+}
+
+async function validateImportRows(type, list, executor, maxErrors = Infinity) {
+  const sizeError = validateParsedRows(list);
+  if (sizeError) return { validation: sizeError, referencesHash: crypto.createHash('sha256').update('no-reference-lookup').digest('hex') };
   const errors = [];
   const seenNames = new Set();
   const seenCodes = new Set();
-  const [faculties, programs, programCourses] = await readImportReferences({ query });
+  const [faculties, programs, programCourses, relationships] = await readImportReferences(executor);
+  const referencesHash = referenceFingerprint([faculties, programs, programCourses, relationships]);
   const facultyIds = new Set(faculties.rows.map((row) => Number(row.id)));
   const programIds = new Set(programs.rows.map((row) => Number(row.id)));
   const courseIds = new Set(programCourses.rows.map((row) => Number(row.id)));
   const courseCodeToId = new Map(programCourses.rows.map((row) => [row.code, Number(row.id)]));
   for (const [index, row] of list.entries()) {
     const line = index + 1;
-    if (!row || typeof row !== 'object' || Array.isArray(row) || !Object.keys(row).length) { errors.push({ line, error: 'Empty or malformed row' }); continue; }
+    if (!row || typeof row !== 'object' || Array.isArray(row) || !Object.keys(row).length) { addImportError(errors, line, 'Empty or malformed row', maxErrors); continue; }
     if (type === 'faculties') {
       const name = String(row.name || '').trim().toLowerCase();
-      if (!name) errors.push({ line, error: 'Missing faculty name' });
-      if (faculties.rows.some((item) => item.name === name)) errors.push({ line, error: 'Duplicate faculty name already exists' });
-      if (seenNames.has(name)) errors.push({ line, error: 'Duplicate faculty name in import' });
+      if (!name) addImportError(errors, line, 'Missing faculty name', maxErrors);
+      if (faculties.rows.some((item) => item.name === name)) addImportError(errors, line, 'Duplicate faculty name already exists', maxErrors);
+      if (seenNames.has(name)) addImportError(errors, line, 'Duplicate faculty name in import', maxErrors);
     }
     if (type === 'programs') {
       const facultyId = Number(row.facultyId ?? row.faculty_id);
       const name = String(row.name || '').trim().toLowerCase();
-      if (!facultyId) errors.push({ line, error: 'Missing facultyId' });
-      else if (!facultyIds.has(facultyId)) errors.push({ line, error: 'Unknown facultyId' });
-      if (!name) errors.push({ line, error: 'Missing program name' });
-      if (programs.rows.some((item) => Number(item.faculty_id) === facultyId && item.name === name)) errors.push({ line, error: 'Duplicate program already exists for faculty' });
-      if (seenNames.has(`${facultyId}:${name}`)) errors.push({ line, error: 'Duplicate program in import' });
-      if (![4, 5, '4', '5'].includes(row.durationYears ?? row.duration_years)) errors.push({ line, error: 'Invalid duration' });
+      if (!facultyId) addImportError(errors, line, 'Missing facultyId', maxErrors);
+      else if (!facultyIds.has(facultyId)) addImportError(errors, line, 'Unknown facultyId', maxErrors);
+      if (!name) addImportError(errors, line, 'Missing program name', maxErrors);
+      if (programs.rows.some((item) => Number(item.faculty_id) === facultyId && item.name === name)) addImportError(errors, line, 'Duplicate program already exists for faculty', maxErrors);
+      if (seenNames.has(`${facultyId}:${name}`)) addImportError(errors, line, 'Duplicate program in import', maxErrors);
+      if (![4, 5, '4', '5'].includes(row.durationYears ?? row.duration_years)) addImportError(errors, line, 'Invalid duration', maxErrors);
     }
     if (type === 'programCourses') {
       const programId = Number(row.programId ?? row.program_id);
@@ -432,53 +475,256 @@ export async function validateImport({ type, format = 'json', content }) {
       const yearNo = Number(row.yearNo ?? row.year_no);
       const semesterNo = Number(row.semesterNo ?? row.semester_no);
       const credits = Number(row.credits ?? 0);
-      if (!programId) errors.push({ line, error: 'Missing programId' });
-      else if (!programIds.has(programId)) errors.push({ line, error: 'Unknown programId' });
-      if (!code) errors.push({ line, error: 'Missing code' });
-      if (!name) errors.push({ line, error: 'Missing name' });
-      if (!Number.isInteger(yearNo) || yearNo < 1 || yearNo > 5) errors.push({ line, error: 'Invalid yearNo' });
-      if (!Number.isInteger(semesterNo) || semesterNo < 1 || semesterNo > 10) errors.push({ line, error: 'Invalid semesterNo' });
-      if (!Number.isInteger(credits) || credits < 0 || credits > 30) errors.push({ line, error: 'Invalid credits' });
-      if (programCourses.rows.some((item) => item.code === code || item.name === name)) errors.push({ line, error: 'Duplicate course code or name already exists' });
-      if (seenCodes.has(code)) errors.push({ line, error: 'Duplicate code in import' });
+      if (!programId) addImportError(errors, line, 'Missing programId', maxErrors);
+      else if (!programIds.has(programId)) addImportError(errors, line, 'Unknown programId', maxErrors);
+      if (!code) addImportError(errors, line, 'Missing code', maxErrors);
+      if (!name) addImportError(errors, line, 'Missing name', maxErrors);
+      if (!Number.isInteger(yearNo) || yearNo < 1 || yearNo > 5) addImportError(errors, line, 'Invalid yearNo', maxErrors);
+      if (!Number.isInteger(semesterNo) || semesterNo < 1 || semesterNo > 10) addImportError(errors, line, 'Invalid semesterNo', maxErrors);
+      if (!Number.isInteger(credits) || credits < 0 || credits > 30) addImportError(errors, line, 'Invalid credits', maxErrors);
+      if (programCourses.rows.some((item) => item.code === code || item.name === name)) addImportError(errors, line, 'Duplicate course code or name already exists', maxErrors);
+      if (seenCodes.has(code)) addImportError(errors, line, 'Duplicate code in import', maxErrors);
       seenCodes.add(code);
       for (const prerequisiteCode of String(row.prerequisites || '').split(',').map((codeItem) => codeItem.trim().toLowerCase()).filter(Boolean)) {
-        if (!courseCodeToId.has(prerequisiteCode)) errors.push({ line, error: `Unknown prerequisite code: ${prerequisiteCode}` });
+        if (!courseCodeToId.has(prerequisiteCode)) addImportError(errors, line, `Unknown prerequisite code: ${prerequisiteCode}`, maxErrors);
       }
     }
     if (type === 'relationships') {
       const courseId = Number(row.courseId ?? row.course_id) || courseCodeToId.get(String(row.courseCode ?? row.course_code ?? '').trim().toLowerCase());
       const prerequisiteCourseId = Number(row.prerequisiteCourseId ?? row.prerequisite_course_id) || courseCodeToId.get(String(row.prerequisiteCode ?? row.prerequisite_code ?? '').trim().toLowerCase());
-      if (!courseId || !courseIds.has(courseId)) errors.push({ line, error: 'Unknown course' });
-      if (!prerequisiteCourseId || !courseIds.has(prerequisiteCourseId)) errors.push({ line, error: 'Unknown prerequisite course' });
-      if (courseId && prerequisiteCourseId && courseId === prerequisiteCourseId) errors.push({ line, error: 'Course cannot require itself' });
+      if (!courseId || !courseIds.has(courseId)) addImportError(errors, line, 'Unknown course', maxErrors);
+      if (!prerequisiteCourseId || !courseIds.has(prerequisiteCourseId)) addImportError(errors, line, 'Unknown prerequisite course', maxErrors);
+      if (courseId && prerequisiteCourseId && courseId === prerequisiteCourseId) addImportError(errors, line, 'Course cannot require itself', maxErrors);
     }
     const nameKey = type === 'programs' ? `${Number(row.facultyId ?? row.faculty_id)}:${String(row.name || '').toLowerCase()}` : String(row.name || '').toLowerCase();
-    if (nameKey && seenNames.has(nameKey)) errors.push({ line, error: 'Duplicate name in import' });
+    if (nameKey && seenNames.has(nameKey)) addImportError(errors, line, 'Duplicate name in import', maxErrors);
     if (nameKey) seenNames.add(nameKey);
   }
-  return { valid: errors.length === 0, count: list.length, errors, rows: list };
+  if (errors.truncated) errors.push({ line: 0, error: `Validation stopped after ${maxErrors} errors; reduce the import size or correct earlier rows.` });
+  return {
+    validation: { valid: errors.length === 0, count: list.length, errors, rows: list },
+    referencesHash
+  };
 }
 
-export async function importCatalog(payload) {
-  const validation = await validateImport(payload);
-  if (!validation.valid) return validation;
+async function inspectImport(payload, executor = { query }, maxErrors = Infinity) {
+  const { type, format = 'json', content, fileContent } = payload;
+  if (!['faculties', 'programs', 'programCourses', 'relationships'].includes(type)) {
+    return { validation: validationFailure('Unsupported import type'), referencesHash: '' };
+  }
+  if (!['json', 'csv', 'xlsx', 'pdf'].includes(format)) {
+    return { validation: validationFailure('Unsupported import format'), referencesHash: '' };
+  }
+  let parsed;
+  try { parsed = await importRows({ type, format, content, fileContent }); }
+  catch (error) {
+    return {
+      validation: validationFailure(error.message || 'Invalid import file'),
+      referencesHash: crypto.createHash('sha256').update('no-reference-lookup').digest('hex')
+    };
+  }
+  const list = Array.isArray(parsed) ? parsed : parsed?.[type] || [];
+  return validateImportRows(type, list, executor, maxErrors);
+}
+
+function stageValidation(validation) {
+  return { valid: validation.valid, count: validation.count, errors: validation.errors };
+}
+
+function previewFingerprint(rows, validation, referencesHash) {
+  return importPreviewFingerprint(rows, stageValidation(validation), referencesHash);
+}
+
+function publicImportStage(row, includeRows = true) {
+  const validation = row.validation || {};
+  const expired = row.status === 'staged' && new Date(row.expires_at).getTime() <= Date.now();
+  return {
+    id: row.id,
+    type: row.import_type,
+    format: row.import_format,
+    status: expired ? 'expired' : row.status,
+    previewVersion: row.preview_version,
+    count: Number(validation.count || 0),
+    valid: Boolean(validation.valid),
+    errors: validation.errors || [],
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    publishedAt: row.published_at,
+    cancelledAt: row.cancelled_at,
+    ...(includeRows ? { rows: row.parsed_rows || [] } : {})
+  };
+}
+
+function importStageFingerprint(stage, validation, referencesHash) {
+  return previewFingerprint(stage.parsed_rows || [], validation, referencesHash);
+}
+
+function stageErrorDiff(before = [], after = []) {
+  const key = (item) => `${item.line}:${item.error}`;
+  const beforeKeys = new Set(before.map(key));
+  const afterKeys = new Set(after.map(key));
+  return {
+    addedErrors: after.filter((item) => !beforeKeys.has(key(item))),
+    resolvedErrors: before.filter((item) => !afterKeys.has(key(item)))
+  };
+}
+
+function assertOwnedStage(result) {
+  if (!result.rowCount) throw new NotFoundError('Import stage not found');
+  return result.rows[0];
+}
+
+export async function validateImport(payload) {
+  return (await inspectImport(payload)).validation;
+}
+
+export async function listImportStages(ownerId) {
+  const { rows } = await listCatalogImportStagesForOwner({ query }, ownerId);
+  return rows.map((row) => publicImportStage(row, false));
+}
+
+export async function getImportStage(id, ownerId) {
+  return publicImportStage(assertOwnedStage(await findCatalogImportStageForOwner({ query }, id, ownerId)));
+}
+
+export async function createImportStage(payload, user) {
+  if (!payload || !['faculties', 'programs', 'programCourses', 'relationships'].includes(payload.type)) {
+    throw new AppError('Unsupported import type.', 400, 'UNSUPPORTED_IMPORT_TYPE');
+  }
+  if (!['json', 'csv', 'xlsx', 'pdf'].includes(payload.format || 'json')) {
+    throw new AppError('Unsupported import format.', 400, 'UNSUPPORTED_IMPORT_FORMAT');
+  }
+  const { validation, referencesHash } = await inspectImport(payload, { query }, IMPORT_LIMITS.maxValidationErrors);
+  const serializedRows = JSON.stringify(validation.rows || []);
+  if (Buffer.byteLength(serializedRows, 'utf8') > IMPORT_LIMITS.maxStoredBytes) {
+    throw new AppError('Parsed import exceeds the 8 MB staging storage limit.', 413, 'IMPORT_TOO_LARGE');
+  }
+  const preview = stageValidation(validation);
+  const fingerprint = previewFingerprint(validation.rows || [], validation, referencesHash);
   return withPostgresClient(async (client) => {
     await client.query('BEGIN');
     try {
+      await lockCatalogImportStageOwner(client, user.id);
+      await deleteExpiredCatalogImportStages(client, user.id);
+      const active = await countActiveCatalogImportStages(client, user.id);
+      if (Number(active.rows[0]?.count || 0) >= IMPORT_LIMITS.maxActiveStagesPerAdmin) {
+        throw new AppError(`You may have at most ${IMPORT_LIMITS.maxActiveStagesPerAdmin} active import stages.`, 429, 'IMPORT_STAGE_LIMIT');
+      }
+      const inserted = await insertCatalogImportStage(client, {
+        ownerId: user.id,
+        type: payload.type,
+        format: payload.format || 'json',
+        rows: validation.rows || [],
+        validation: preview,
+        referenceFingerprint: referencesHash,
+        previewFingerprint: fingerprint
+      });
+      const stage = inserted.rows[0];
+      await logAdminAction(client, {
+        adminUser: user.name || user.email || 'Admin',
+        action: 'Catalog Import Staged',
+        entity: 'catalog_import_stage',
+        newValues: { stageId: stage.id, type: stage.import_type, count: preview.count, expiresAt: stage.expires_at },
+        description: `Staged ${preview.count} ${stage.import_type} import row(s)`
+      });
+      await client.query('COMMIT');
+      return publicImportStage(stage);
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    }
+  });
+}
+
+export async function cancelImportStage(id, ownerId, adminName = 'Admin') {
+  return withPostgresClient(async (client) => {
+    await client.query('BEGIN');
+    try {
+      const stage = assertOwnedStage(await findCatalogImportStageForOwner(client, id, ownerId, { forUpdate: true }));
+      if (stage.status !== 'staged') throw new ConflictError('Only active import stages can be cancelled.');
+      const cancelled = await cancelCatalogImportStage(client, id, ownerId);
+      if (!cancelled.rowCount) throw new ConflictError('Import stage is no longer available for cancellation.');
+      await logAdminAction(client, {
+        adminUser: adminName,
+        action: 'Catalog Import Cancelled',
+        entity: 'catalog_import_stage',
+        newValues: { stageId: id, type: stage.import_type },
+        description: `Cancelled staged ${stage.import_type} import`
+      });
+      await client.query('COMMIT');
+      return publicImportStage(cancelled.rows[0]);
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    }
+  });
+}
+
+export async function publishImportStage(id, ownerId, expectedPreviewVersion, user) {
+  return withPostgresClient(async (client) => {
+    await client.query('BEGIN');
+    try {
+      const stage = assertOwnedStage(await findCatalogImportStageForOwner(client, id, ownerId, { forUpdate: true }));
+      if (new Date(stage.expires_at).getTime() <= Date.now()) throw new AppError('Import stage has expired.', 410, 'IMPORT_STAGE_EXPIRED');
+      if (stage.status === 'cancelled') throw new AppError('Cancelled import stages cannot be published.', 409, 'IMPORT_STAGE_CLOSED');
+      if (stage.status === 'published') throw new AppError('Import stage has already been published.', 409, 'IMPORT_STAGE_CLOSED');
+      if (stage.status !== 'staged') throw new ConflictError('Import stage is not available for publication.');
+      if (!Number.isInteger(expectedPreviewVersion) || expectedPreviewVersion < 1) {
+        throw new AppError('A valid preview version is required.', 400, 'INVALID_IMPORT_PREVIEW_VERSION');
+      }
+      const { validation, referencesHash } = await validateImportRows(
+        stage.import_type, stage.parsed_rows || [], client, IMPORT_LIMITS.maxValidationErrors
+      );
+      const currentFingerprint = importStageFingerprint(stage, validation, referencesHash);
+      if (currentFingerprint !== stage.preview_fingerprint) {
+        const refreshed = await refreshCatalogImportStagePreview(client, {
+          id,
+          ownerId,
+          validation: stageValidation(validation),
+          referenceFingerprint: referencesHash,
+          previewFingerprint: currentFingerprint
+        });
+        if (!refreshed.rowCount) {
+          if (new Date(stage.expires_at).getTime() <= Date.now()) throw new AppError('Import stage has expired.', 410, 'IMPORT_STAGE_EXPIRED');
+          throw new ConflictError('Import stage is no longer available.');
+        }
+        await client.query('COMMIT');
+        return {
+          outcome: 'stale',
+          error: 'The catalog changed since this preview. Review the updated preview and confirm publication again.',
+          code: 'IMPORT_PREVIEW_STALE',
+          diff: { ...stageErrorDiff(stage.validation?.errors, validation.errors), catalogReferencesChanged: referencesHash !== stage.reference_fingerprint },
+          stage: publicImportStage(refreshed.rows[0])
+        };
+      }
+      if (expectedPreviewVersion !== Number(stage.preview_version)) {
+        await client.query('ROLLBACK');
+        return { outcome: 'version_conflict', stage: publicImportStage(stage), code: 'IMPORT_PREVIEW_VERSION_CONFLICT' };
+      }
+      if (!validation.valid) {
+        await client.query('ROLLBACK');
+        return { outcome: 'invalid', stage: publicImportStage(stage), code: 'IMPORT_VALIDATION_FAILED' };
+      }
+
       let inserted = 0;
       for (const row of validation.rows) {
-        await insertImportedRow(client, payload.type, row);
+        await insertImportedRow(client, stage.import_type, row);
         inserted += 1;
       }
       await logAdminAction(client, {
-        action: `Imported ${payload.type}`,
-        entity: payload.type,
-        newValues: { inserted },
-        description: `Imported ${inserted} ${payload.type}`
+        adminUser: user.name || user.email || 'Admin',
+        action: `Imported ${stage.import_type}`,
+        entity: stage.import_type,
+        newValues: { inserted, stageId: id },
+        description: `Imported ${inserted} ${stage.import_type} from staged import`
       });
+      const published = await markCatalogImportStagePublished(client, id, ownerId);
+      if (!published.rowCount) {
+        if (new Date(stage.expires_at).getTime() <= Date.now()) throw new AppError('Import stage has expired.', 410, 'IMPORT_STAGE_EXPIRED');
+        throw new ConflictError('Import stage is no longer available for publication.');
+      }
       await client.query('COMMIT');
-      return { valid: true, inserted, errors: [] };
+      return { outcome: 'published', stage: publicImportStage(published.rows[0], false), inserted, valid: true, errors: [] };
     } catch (error) {
       await client.query('ROLLBACK').catch(() => {});
       throw error;

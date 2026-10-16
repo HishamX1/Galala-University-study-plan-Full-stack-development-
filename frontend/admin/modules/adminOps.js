@@ -46,17 +46,44 @@ async function importPayload() {
   return { type: elements.ids.importType.value, format, content: elements.ids.importContent.value };
 }
 
+function renderImportPreview(preview, diff = null) {
+  if (!elements.lists.importPreview) return;
+  const rows = Array.isArray(preview.rows) ? preview.rows : [];
+  const shownRows = rows.slice(0, 100);
+  const errorList = (preview.errors || []).map((item) => `<li>Line ${escapeHtml(item.line)}: ${escapeHtml(item.error)}</li>`).join('');
+  const rowList = shownRows.map((row, index) => `<li><strong>${index + 1}.</strong> <code>${escapeHtml(JSON.stringify(row))}</code></li>`).join('');
+  const changes = diff
+    ? `<p class="warning">The catalog changed since this preview. Review the refreshed validation and explicitly publish again.</p>
+       <p>${escapeHtml(diff.addedErrors?.length || 0)} new validation issue(s), ${escapeHtml(diff.resolvedErrors?.length || 0)} resolved; catalog reference context changed: ${diff.catalogReferencesChanged ? 'yes' : 'no'}.</p>`
+    : '';
+  elements.lists.importPreview.innerHTML = `<p>${preview.status === 'staged' ? 'Staged for review' : 'Validation preview'}: ${escapeHtml(preview.count ?? rows.length)} row(s); ${preview.valid ? 'valid' : 'has errors'}${preview.previewVersion ? `; preview v${escapeHtml(preview.previewVersion)}` : ''}${preview.expiresAt ? `; expires ${escapeHtml(fmtDate(preview.expiresAt))}` : ''}.</p>
+    ${changes}${errorList ? `<ul>${errorList}</ul>` : '<p>No validation errors.</p>'}
+    ${rowList ? `<details><summary>Preview rows${rows.length > shownRows.length ? ` (first ${shownRows.length} of ${rows.length})` : ''}</summary><ol>${rowList}</ol></details>` : ''}`;
+}
+
+function renderImportStages() {
+  if (!elements.lists.importStages) return;
+  elements.lists.importStages.innerHTML = cache.importStages.map((stage) => `<div class="import-stage-row">
+    <span><strong>${escapeHtml(stage.type)}</strong> · ${escapeHtml(stage.count)} row(s) · expires ${escapeHtml(fmtDate(stage.expiresAt))}</span>
+    <button type="button" data-import-review="${escapeHtml(stage.id)}">Review</button>
+    <button type="button" data-import-publish="${escapeHtml(stage.id)}" data-preview-version="${escapeHtml(stage.previewVersion)}" ${stage.valid ? '' : 'disabled'}>Publish</button>
+    <button type="button" data-import-cancel="${escapeHtml(stage.id)}">Cancel</button>
+  </div>`).join('') || '<p class="empty-state">No active staged imports.</p>';
+}
+
 export async function loadAdminOps() {
-  const [dashboard, recycleBin, backups, health] = await Promise.all([
+  const [dashboard, recycleBin, backups, health, importStages] = await Promise.all([
     request('/admin/dashboard'),
     request('/admin/recycle-bin'),
     request('/admin/backups'),
-    request('/admin/system-health')
+    request('/admin/system-health'),
+    request('/admin/import/stages')
   ]);
   cache.dashboard = dashboard;
   cache.recycleBin = recycleBin;
   cache.backups = backups;
   cache.systemHealth = health;
+  cache.importStages = importStages;
   await loadAuditLogs();
   renderAdminOps();
 }
@@ -145,6 +172,7 @@ export function renderAdminOps() {
       metric('Migration Version', health.migrationVersion)
     ].join('');
   }
+  renderImportStages();
 }
 
 export function bindAdminOpsActions() {
@@ -172,8 +200,11 @@ export function bindAdminOpsActions() {
     const backupBtn = event.target.closest('#createBackup');
     const downloadBackup = event.target.closest('[data-download-backup]');
     const validateImportBtn = event.target.closest('#validateImport');
-    const runImportBtn = event.target.closest('#runImport');
-    if (!quick && !restore && !purge && !exportBtn && !backupBtn && !downloadBackup && !validateImportBtn && !runImportBtn) return;
+    const stageImportBtn = event.target.closest('#stageImport');
+    const reviewImport = event.target.closest('[data-import-review]');
+    const publishImport = event.target.closest('[data-import-publish]');
+    const cancelImport = event.target.closest('[data-import-cancel]');
+    if (!quick && !restore && !purge && !exportBtn && !backupBtn && !downloadBackup && !validateImportBtn && !stageImportBtn && !reviewImport && !publishImport && !cancelImport) return;
 
     try {
       if (quick) {
@@ -205,18 +236,53 @@ export function bindAdminOpsActions() {
       if (downloadBackup) {
         downloadPayload(await download(`/admin/backups/${downloadBackup.dataset.downloadBackup}/download`));
       }
-      if (validateImportBtn || runImportBtn) {
+      if (validateImportBtn || stageImportBtn) {
         const payload = await importPayload();
         const result = validateImportBtn
           ? await request('/admin/import/validate', { method: 'POST', body: JSON.stringify(payload) })
-          : await request('/admin/import', { method: 'POST', body: JSON.stringify(payload) });
-        elements.lists.importPreview.innerHTML = result.valid
-          ? `<p class="success">${escapeHtml(result.inserted ? `Imported ${result.inserted} row(s).` : `${result.count} row(s) validated.`)}</p>`
-          : `<ul>${result.errors.map((item) => `<li>Line ${escapeHtml(item.line)}: ${escapeHtml(item.error)}</li>`).join('')}</ul>`;
+          : await request('/admin/import/stages', { method: 'POST', body: JSON.stringify(payload) });
+        renderImportPreview(result);
+        if (stageImportBtn) {
+          elements.ids.importContent.value = '';
+          if (elements.ids.importFile) elements.ids.importFile.value = '';
+          cache.importStages = await request('/admin/import/stages');
+          renderImportStages();
+          setMessage('success', 'Import staged. Review the saved preview before publishing.');
+        }
+      }
+      if (reviewImport) {
+        const stage = await request(`/admin/import/stages/${encodeURIComponent(reviewImport.dataset.importReview)}`);
+        renderImportPreview(stage);
+      }
+      if (cancelImport) {
+        const confirmed = await openConfirmDialog({ title: 'Cancel Staged Import', description: 'This prevents publication. The staged data is retained only until its 24-hour expiry and then cleaned up.', submitLabel: 'Cancel Import' });
+        if (!confirmed) return;
+        await request(`/admin/import/stages/${encodeURIComponent(cancelImport.dataset.importCancel)}`, { method: 'DELETE' });
+        cache.importStages = await request('/admin/import/stages');
+        renderImportStages();
+        setMessage('success', 'Staged import cancelled.');
+      }
+      if (publishImport) {
+        const stage = cache.importStages.find((item) => item.id === publishImport.dataset.importPublish);
+        if (!stage?.valid) throw new Error('Review a valid staged import before publishing.');
+        const confirmed = await openConfirmDialog({ title: 'Publish Catalog Import', description: `Publish ${stage.count} ${stage.type} row(s)? This will write catalog changes and an audit record in one transaction.`, submitLabel: 'Publish Import' });
+        if (!confirmed) return;
+        const result = await request(`/admin/import/stages/${encodeURIComponent(stage.id)}/publish`, {
+          method: 'POST', body: JSON.stringify({ previewVersion: Number(publishImport.dataset.previewVersion) })
+        });
+        renderImportPreview({ ...result.stage, valid: true, count: result.inserted, rows: [] });
+        cache.importStages = await request('/admin/import/stages');
+        renderImportStages();
         await loadRelations();
         await loadAdminOps();
+        setMessage('success', `Published ${result.inserted} import row(s).`);
       }
     } catch (error) {
+      if (error.data?.stage) renderImportPreview(error.data.stage, error.data.diff || null);
+      if (['IMPORT_PREVIEW_STALE', 'IMPORT_PREVIEW_VERSION_CONFLICT'].includes(error.code)) {
+        cache.importStages = await request('/admin/import/stages').catch(() => cache.importStages);
+        renderImportStages();
+      }
       setMessage('error', error.message);
     }
   });

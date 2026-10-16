@@ -46,6 +46,10 @@ export async function request(path, options = {}) {
       const data = await res.json();
       if (!res.ok) {
         const error = new Error(data.error || 'Request failed');
+        error.status = res.status;
+        error.code = data.code;
+        error.data = data;
+        if (path.startsWith('/admin/import') && [409, 410, 422, 429].includes(res.status)) error.noRetry = true;
         if (res.status === 401) {
           window.location.assign('../admin-login.html');
           error.noRetry = true;

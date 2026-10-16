@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - architecture-review-1-unverified
+      - codex/catalog-import-staging
   pull_request:
     branches:
       - main
@@ -65,11 +66,13 @@ jobs:
       - name: Run static and database-free regressions
         run: >-
           npm run check &&
+          npm run check:import-staging &&
           npm run check:admin-transactions &&
           npm run check:catalog-crud &&
           npm run test:db-guard &&
           npm run test:refresh-rollback &&
           npm run test:admin-routes &&
+          npm run test:admin-import-staging-routes &&
           npm run test:admin-ops-repositories &&
           npm run test:admin-import &&
           npm run test:student-catalog-xss &&
@@ -87,4 +90,5 @@ jobs:
           npm run test:student-portal &&
           npm run test:recycle-bin &&
           npm run test:admin-transactions &&
+          npm run test:admin-import-staging &&
           npm run test:catalog-crud
