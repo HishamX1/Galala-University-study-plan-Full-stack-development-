@@ -14,3 +14,7 @@ export async function listBackups(executor) {
 export async function findBackupSnapshot(executor, id) {
   return executor.query('SELECT id, format, snapshot FROM admin_backup_history WHERE id = $1', [id]);
 }
+
+export async function findLatestBackupCreatedAt(executor) {
+  return executor.query('SELECT created_at FROM admin_backup_history ORDER BY created_at DESC LIMIT 1');
+}

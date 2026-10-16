@@ -1,8 +1,10 @@
 import crypto from 'node:crypto';
-import { authenticate, createSession, createUser, currentUser, refreshSession, resetUserPassword, updateUser } from '../backend/src/services/authService.js';
-import { closePool, query } from '../backend/src/db/client.js';
+import { requireIsolatedTestDatabase } from './helpers/require-isolated-test-database.js';
 
-if (process.env.NODE_ENV === 'production') throw new Error('Authentication lifecycle tests must not run in production.');
+requireIsolatedTestDatabase();
+
+const { authenticate, createSession, createUser, currentUser, refreshSession, resetUserPassword, updateUser } = await import('../backend/src/services/authService.js');
+const { closePool, query } = await import('../backend/src/db/client.js');
 
 const suffix = crypto.randomUUID();
 const email = `auth-lifecycle-${suffix}@example.test`;

@@ -1,12 +1,14 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import fs from 'node:fs';
-import { handleApi } from '../backend/src/routes/catalogRoutes.js';
-import { createUser } from '../backend/src/services/authService.js';
-import { closePool, query } from '../backend/src/db/client.js';
+import { requireIsolatedTestDatabase } from './helpers/require-isolated-test-database.js';
 import { normalizeCatalog } from '../frontend/shared/catalogNormalizer.js';
 
-if (process.env.NODE_ENV === 'production') throw new Error('Student Portal regression tests must not run in production.');
+requireIsolatedTestDatabase();
+
+const { handleApi } = await import('../backend/src/routes/catalogRoutes.js');
+const { createUser } = await import('../backend/src/services/authService.js');
+const { closePool, query } = await import('../backend/src/db/client.js');
 
 const origin = 'http://127.0.0.1:5500';
 const suffix = crypto.randomUUID();

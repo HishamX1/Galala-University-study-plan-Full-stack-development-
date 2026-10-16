@@ -28,6 +28,26 @@ export async function readImportReferences(executor) {
   ]);
 }
 
+export async function countDeletedCatalogEntities(executor) {
+  return executor.query(
+    `SELECT 'Faculty' AS entity, count(*)::int AS count FROM faculties WHERE deleted_at IS NOT NULL
+     UNION ALL SELECT 'Program', count(*)::int FROM programs WHERE deleted_at IS NOT NULL
+     UNION ALL SELECT 'Course', count(*)::int FROM program_courses WHERE deleted_at IS NOT NULL
+     UNION ALL SELECT 'Relationship', count(*)::int FROM course_prerequisites WHERE deleted_at IS NOT NULL`
+  );
+}
+
+export async function countActiveCatalogEntities(executor) {
+  return executor.query(
+    `SELECT
+      (SELECT count(*)::int FROM faculties WHERE deleted_at IS NULL) AS faculties,
+      (SELECT count(*)::int FROM programs WHERE deleted_at IS NULL) AS programs,
+      (SELECT count(*)::int FROM courses WHERE deleted_at IS NULL) AS courses,
+      (SELECT count(*)::int FROM program_courses WHERE deleted_at IS NULL) AS program_courses,
+      (SELECT count(*)::int FROM course_prerequisites WHERE deleted_at IS NULL) AS relationships`
+  );
+}
+
 export async function insertImportedRow(executor, type, row) {
   if (type === 'faculties') {
     await executor.query('INSERT INTO faculties (name) VALUES ($1) ON CONFLICT DO NOTHING', [String(row.name).trim()]);

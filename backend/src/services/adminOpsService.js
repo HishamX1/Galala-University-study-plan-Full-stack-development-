@@ -1,10 +1,10 @@
 import { query, withPostgresClient } from '../db/client.js';
 import ExcelJS from 'exceljs';
 import { parseXlsxInWorker, XLSX_PARSER_LIMITS } from './xlsxImportParser.js';
-import { insertAuditLog, listAuditLogs } from '../repositories/auditRepository.js';
-import { findBackupSnapshot, insertBackup, listBackups } from '../repositories/backupRepository.js';
-import { insertImportedRow, readCatalogSnapshot, readImportReferences } from '../repositories/adminCatalogRepository.js';
-import { deleteEntity, deleteProgramCourseAndOrphanCourse, findDeletedEntity, findEntity, listDeletedCatalog, listProgramCourseIdsForFaculty, listProgramCourseIdsForProgram, restoreEntity, restorePrerequisitesForCourse, restorePrerequisitesForCourses, restoreProgramCoursesForFaculty, restoreProgramCoursesForProgram, restoreProgramsForFaculty } from '../repositories/recycleBinRepository.js';
+import { countTodayAuditEvents, findLatestAuditEvent, insertAuditLog, listAuditLogs, listRecentAuditEvents } from '../repositories/auditRepository.js';
+import { findBackupSnapshot, findLatestBackupCreatedAt, insertBackup, listBackups } from '../repositories/backupRepository.js';
+import { countActiveCatalogEntities, countDeletedCatalogEntities, insertImportedRow, readCatalogSnapshot, readImportReferences } from '../repositories/adminCatalogRepository.js';
+import { deleteEntity, deleteProgramCourseAndOrphanCourse, findDeletedEntity, listDeletedCatalog, listProgramCourseIdsForFaculty, listProgramCourseIdsForProgram, restoreEntity, restorePrerequisitesForCourse, restorePrerequisitesForCourses, restoreProgramCoursesForFaculty, restoreProgramCoursesForProgram, restoreProgramsForFaculty } from '../repositories/recycleBinRepository.js';
 
 const ENTITY_TABLES = {
   faculty: 'faculties',
@@ -12,6 +12,8 @@ const ENTITY_TABLES = {
   course: 'program_courses',
   relation: 'course_prerequisites'
 };
+
+const ADMIN_OPERATIONS_MIGRATION_VERSION = '20260712100000_admin_operations';
 
 export const IMPORT_LIMITS = Object.freeze({
   maxFileBytes: XLSX_PARSER_LIMITS.maxFileBytes,
@@ -164,23 +166,6 @@ export async function logAdminAction(client, { action, entity, entityId = null, 
 }
 
 export async function getAuditLogs(filters = {}) {
-  const params = [];
-  const conditions = [];
-  if (filters.range === 'today') conditions.push("created_at >= date_trunc('day', now())");
-  if (filters.range === 'week') conditions.push("created_at >= date_trunc('week', now())");
-  if (filters.entity) {
-    params.push(filters.entity);
-    conditions.push(`entity = $${params.length}`);
-  }
-  if (filters.action) {
-    params.push(`%${filters.action}%`);
-    conditions.push(`action ILIKE $${params.length}`);
-  }
-  if (filters.search) {
-    params.push(`%${filters.search}%`);
-    conditions.push(`(description ILIKE $${params.length} OR action ILIKE $${params.length} OR entity ILIKE $${params.length})`);
-  }
-  const order = filters.order === 'oldest' ? 'ASC' : 'DESC';
   const limit = Math.min(Number(filters.limit) || 100, 500);
   const { rows } = await listAuditLogs({ query }, { ...filters, limit });
   return rows.map((row) => ({ ...row, id: toInt(row.id), entityId: row.entity_id == null ? null : toInt(row.entity_id) }));
@@ -190,19 +175,9 @@ export async function getDashboardSummary() {
   return withPostgresClient(async (client) => {
     const catalog = await catalogRows(client);
     const relations = catalog.relationships;
-    const today = await client.query("SELECT count(*)::int AS count FROM admin_audit_logs WHERE created_at >= date_trunc('day', now())");
-    const logs = await client.query(
-      `SELECT id, created_at, action, entity, entity_id, description
-         FROM admin_audit_logs
-        ORDER BY created_at DESC
-        LIMIT 8`
-    );
-    const deleted = await client.query(
-      `SELECT 'Faculty' AS entity, count(*)::int AS count FROM faculties WHERE deleted_at IS NOT NULL
-       UNION ALL SELECT 'Program', count(*)::int FROM programs WHERE deleted_at IS NOT NULL
-       UNION ALL SELECT 'Course', count(*)::int FROM program_courses WHERE deleted_at IS NOT NULL
-       UNION ALL SELECT 'Relationship', count(*)::int FROM course_prerequisites WHERE deleted_at IS NOT NULL`
-    );
+    const today = await countTodayAuditEvents(client);
+    const logs = await listRecentAuditEvents(client);
+    const deleted = await countDeletedCatalogEntities(client);
     const programCounts = catalog.programs.map((program) => ({
       id: toInt(program.id),
       name: program.name,
@@ -244,18 +219,10 @@ export async function getDashboardSummary() {
 
 export async function getSystemHealth() {
   return withPostgresClient(async (client) => {
-    const totals = await client.query(
-      `SELECT
-        (SELECT count(*)::int FROM faculties WHERE deleted_at IS NULL) AS faculties,
-        (SELECT count(*)::int FROM programs WHERE deleted_at IS NULL) AS programs,
-        (SELECT count(*)::int FROM courses WHERE deleted_at IS NULL) AS courses,
-        (SELECT count(*)::int FROM program_courses WHERE deleted_at IS NULL) AS program_courses,
-        (SELECT count(*)::int FROM course_prerequisites WHERE deleted_at IS NULL) AS relationships`
-    );
-    const backup = await client.query('SELECT created_at FROM admin_backup_history ORDER BY created_at DESC LIMIT 1');
-    const importLog = await client.query("SELECT created_at FROM admin_audit_logs WHERE action ILIKE 'Imported%' ORDER BY created_at DESC LIMIT 1");
-    const exportLog = await client.query("SELECT created_at FROM admin_audit_logs WHERE action ILIKE 'Exported%' ORDER BY created_at DESC LIMIT 1");
-    const migration = await client.query("SELECT '20260712100000_admin_operations' AS version");
+    const totals = await countActiveCatalogEntities(client);
+    const backup = await findLatestBackupCreatedAt(client);
+    const importLog = await findLatestAuditEvent(client, 'Imported');
+    const exportLog = await findLatestAuditEvent(client, 'Exported');
     return {
       backendStatus: 'green',
       databaseStatus: 'green',
@@ -264,7 +231,7 @@ export async function getSystemHealth() {
       lastBackup: backup.rows[0]?.created_at || null,
       lastImport: importLog.rows[0]?.created_at || null,
       lastExport: exportLog.rows[0]?.created_at || null,
-      migrationVersion: migration.rows[0].version,
+      migrationVersion: ADMIN_OPERATIONS_MIGRATION_VERSION,
       totalRecords: totals.rows[0]
     };
   });
@@ -322,7 +289,7 @@ export async function permanentlyDeleteRecycleItem(kind, id) {
   return withPostgresClient(async (client) => {
     await client.query('BEGIN');
     try {
-      const current = await findEntity(client, kind, id);
+      const current = await findDeletedEntity(client, kind, id);
       if (!current.rowCount) {
         await client.query('ROLLBACK');
         return false;
@@ -382,22 +349,29 @@ export async function exportCatalog(format = 'json') {
 export async function createBackup(format = 'json') {
   if (!['json', 'csv', 'xlsx'].includes(format)) throw new Error('Unsupported backup format');
   return withPostgresClient(async (client) => {
-    const catalog = await catalogRows(client);
-    const recordCounts = {
-      faculties: catalog.faculties.length,
-      programs: catalog.programs.length,
-      programCourses: catalog.programCourses.length,
-      relationships: catalog.relationships.length
-    };
-    const { rows } = await insertBackup(client, format, recordCounts, catalog, `Catalog backup generated as ${format}`);
-    await logAdminAction(client, {
-      action: 'Database Backup',
-      entity: 'backup',
-      entityId: rows[0].id,
-      newValues: rows[0],
-      description: `Generated ${format} catalog backup`
-    });
-    return { ...rows[0], id: toInt(rows[0].id) };
+    await client.query('BEGIN');
+    try {
+      const catalog = await catalogRows(client);
+      const recordCounts = {
+        faculties: catalog.faculties.length,
+        programs: catalog.programs.length,
+        programCourses: catalog.programCourses.length,
+        relationships: catalog.relationships.length
+      };
+      const { rows } = await insertBackup(client, format, recordCounts, catalog, `Catalog backup generated as ${format}`);
+      await logAdminAction(client, {
+        action: 'Database Backup',
+        entity: 'backup',
+        entityId: rows[0].id,
+        newValues: rows[0],
+        description: `Generated ${format} catalog backup`
+      });
+      await client.query('COMMIT');
+      return { ...rows[0], id: toInt(rows[0].id) };
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    }
   });
 }
 

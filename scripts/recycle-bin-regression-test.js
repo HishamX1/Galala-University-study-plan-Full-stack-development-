@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
-import { withPostgresClient } from '../backend/src/db/client.js';
-import { restoreRecycleItem, permanentlyDeleteRecycleItem } from '../backend/src/services/adminOpsService.js';
+import { requireIsolatedTestDatabase } from './helpers/require-isolated-test-database.js';
+
+requireIsolatedTestDatabase();
+
+const { withPostgresClient } = await import('../backend/src/db/client.js');
+const { restoreRecycleItem, permanentlyDeleteRecycleItem } = await import('../backend/src/services/adminOpsService.js');
 
 const suffix = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 const facultyName = `Recycle Test Faculty ${suffix}`;
@@ -8,32 +12,38 @@ const programName = `Recycle Test Program ${suffix}`;
 const courseName = `Recycle Test Course ${suffix}`;
 const sharedCourseName = `Recycle Shared Course ${suffix}`;
 
-let ids;
-
-async function removeStaleAttempt(client) {
-  await client.query("DELETE FROM faculties WHERE name = 'Recycle Test Faculty 1791146783351_eb83ve'");
-  await client.query("DELETE FROM courses WHERE name IN ('Recycle Test Course 1791146783351_eb83ve', 'Recycle Shared Course 1791146783351_eb83ve')");
-}
+const ids = {};
 
 async function setup(client) {
   const faculty = await client.query('INSERT INTO faculties (name) VALUES ($1) RETURNING id', [facultyName]);
+  ids.faculty = faculty.rows[0].id;
   const program = await client.query('INSERT INTO programs (faculty_id, name, duration_years) VALUES ($1, $2, 4) RETURNING id', [faculty.rows[0].id, programName]);
+  ids.program = program.rows[0].id;
   const course = await client.query('INSERT INTO courses (name) VALUES ($1) RETURNING id', [courseName]);
+  ids.course = course.rows[0].id;
   const sharedCourse = await client.query('INSERT INTO courses (name) VALUES ($1) RETURNING id', [sharedCourseName]);
+  ids.sharedCourse = sharedCourse.rows[0].id;
   const first = await client.query(`INSERT INTO program_courses (program_id, course_id, code, year_no, semester_no)
     VALUES ($1, $2, $3, 1, 1) RETURNING id`, [program.rows[0].id, course.rows[0].id, `RT-${suffix}`]);
+  ids.first = first.rows[0].id;
   const secondProgram = await client.query('INSERT INTO programs (faculty_id, name, duration_years) VALUES ($1, $2, 4) RETURNING id', [faculty.rows[0].id, `${programName} 2`]);
+  ids.secondProgram = secondProgram.rows[0].id;
   const sharedOne = await client.query(`INSERT INTO program_courses (program_id, course_id, code, year_no, semester_no)
     VALUES ($1, $2, $3, 1, 2) RETURNING id`, [program.rows[0].id, sharedCourse.rows[0].id, `RS-${suffix}`]);
+  ids.sharedOne = sharedOne.rows[0].id;
   const sharedTwo = await client.query(`INSERT INTO program_courses (program_id, course_id, code, year_no, semester_no)
     VALUES ($1, $2, $3, 2, 1) RETURNING id`, [secondProgram.rows[0].id, sharedCourse.rows[0].id, `RU-${suffix}`]);
+  ids.second = sharedTwo.rows[0].id;
   const relation = await client.query('INSERT INTO course_prerequisites (course_id, prerequisite_course_id, visible_to_students) VALUES ($1, $2, false) RETURNING id', [first.rows[0].id, sharedOne.rows[0].id]);
-  ids = { faculty: faculty.rows[0].id, program: program.rows[0].id, secondProgram: secondProgram.rows[0].id, course: course.rows[0].id, sharedCourse: sharedCourse.rows[0].id, first: first.rows[0].id, sharedOne: sharedOne.rows[0].id, second: sharedTwo.rows[0].id, relation: relation.rows[0].id };
+  ids.relation = relation.rows[0].id;
+  assert.equal(await permanentlyDeleteRecycleItem('faculty', ids.faculty), false,
+    'permanent deletion must reject active catalog rows');
+  const activeFaculty = await client.query('SELECT id FROM faculties WHERE id = $1', [ids.faculty]);
+  assert.equal(activeFaculty.rowCount, 1, 'active faculty must remain intact after rejected purge');
 }
 
 async function run() {
   await withPostgresClient(async (client) => {
-    await removeStaleAttempt(client);
     await setup(client);
     await client.query('BEGIN');
     try {
@@ -83,13 +93,18 @@ async function run() {
 try {
   await run();
 } finally {
-  await withPostgresClient(async (client) => {
-    if (!ids) return;
-    await client.query('DELETE FROM admin_audit_logs WHERE entity_id = ANY($1::bigint[])', [[ids.faculty, ids.program, ids.secondProgram, ids.first, ids.sharedOne, ids.second, ids.relation]]);
-    await client.query('DELETE FROM course_prerequisites WHERE id = $1', [ids.relation]);
-    await client.query('DELETE FROM program_courses WHERE id IN ($1, $2)', [ids.first, ids.second]);
-    await client.query('DELETE FROM programs WHERE id IN ($1, $2)', [ids.program, ids.secondProgram]);
-    await client.query('DELETE FROM faculties WHERE id = $1', [ids.faculty]);
-    await client.query('DELETE FROM courses WHERE id IN ($1, $2)', [ids.course, ids.sharedCourse]);
+  const fixtureIds = Object.values(ids).filter((id) => id !== undefined && id !== null);
+  if (fixtureIds.length) await withPostgresClient(async (client) => {
+    await client.query(`DELETE FROM admin_audit_logs
+      WHERE (entity = 'faculty' AND entity_id = $1 AND action = 'Restored faculty')
+        OR (entity = 'course' AND entity_id = ANY($2::bigint[]) AND action = 'Permanently Deleted course')`, [
+      ids.faculty ?? null,
+      [ids.sharedOne, ids.second].filter((id) => id !== undefined && id !== null)
+    ]);
+    await client.query('DELETE FROM course_prerequisites WHERE id = ANY($1::bigint[])', [ids.relation ? [ids.relation] : []]);
+    await client.query('DELETE FROM program_courses WHERE id = ANY($1::bigint[])', [[ids.first, ids.sharedOne, ids.second].filter(Boolean)]);
+    await client.query('DELETE FROM programs WHERE id = ANY($1::bigint[])', [[ids.program, ids.secondProgram].filter(Boolean)]);
+    await client.query('DELETE FROM faculties WHERE id = ANY($1::bigint[])', [ids.faculty ? [ids.faculty] : []]);
+    await client.query('DELETE FROM courses WHERE id = ANY($1::bigint[])', [[ids.course, ids.sharedCourse].filter(Boolean)]);
   });
 }
