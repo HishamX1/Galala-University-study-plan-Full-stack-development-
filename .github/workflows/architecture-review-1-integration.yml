@@ -66,6 +66,7 @@ jobs:
         run: >-
           npm run check &&
           npm run check:admin-transactions &&
+          npm run check:catalog-crud &&
           npm run test:db-guard &&
           npm run test:refresh-rollback &&
           npm run test:admin-routes &&
@@ -85,4 +86,5 @@ jobs:
           npm run test:session &&
           npm run test:student-portal &&
           npm run test:recycle-bin &&
-          npm run test:admin-transactions
+          npm run test:admin-transactions &&
+          npm run test:catalog-crud
