@@ -24,7 +24,10 @@ export async function readImportReferences(executor) {
     executor.query(`SELECT pc.id, pc.program_id, lower(pc.code) AS code, lower(c.name) AS name
          FROM program_courses pc
          JOIN courses c ON c.id = pc.course_id AND c.deleted_at IS NULL
-        WHERE pc.deleted_at IS NULL`)
+        WHERE pc.deleted_at IS NULL`),
+    executor.query(`SELECT id, course_id, prerequisite_course_id, visible_to_students
+         FROM course_prerequisites
+        WHERE deleted_at IS NULL`)
   ]);
 }
 

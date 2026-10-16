@@ -11,7 +11,7 @@ The canonical academic catalog is `faculties`, `programs`, `courses`, `program_c
 - `catalogRoutes.js` retains the HTTP dispatch, security middleware, permission gates, and shared error mapping; controller-backed endpoint groups are covered by focused compatibility checks.
 - Catalog, user, session, recovery, notification, audit, backup, recycle-bin, and admin catalog persistence is repository-backed. Admin services retain domain decisions, multi-repository orchestration, and service-owned transaction control.
 - Existing persisted roles are `student`, `regular_admin`, and `super_admin`; the project brief's `admin` label must remain an alias in documentation rather than a data migration.
-- Import currently validates and then writes to production tables. It has no staging/approval boundary.
+- Catalog import now uses persisted, owner-scoped staging, current-catalog revalidation, explicit same-administrator publication, and atomic publication/audit state. See `docs/catalog-import-staging.md`; the staging migration must be applied through the approved database change process before deploying this code.
 - Administrative catalog updates are transactional in several paths, but most updates are last-write-wins; no general version field exists.
 - The application has focused executable regression scripts and a GitHub Actions workflow that provisions a disposable PostgreSQL integration database per run; there is no repository-managed persistent test database.
 - Refresh tokens and password-reset tokens are correctly stored as hashes, but security controls needed a common boundary and request observability.

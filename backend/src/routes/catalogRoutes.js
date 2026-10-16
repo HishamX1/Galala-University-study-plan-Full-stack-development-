@@ -130,11 +130,10 @@ export async function handleApi(req, res, url, { resolveCurrentUser = currentUse
       if (user.role !== 'super_admin') return forbidden(res);
     }
 
-    if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/admin/import/validate`) {
-      if (!requirePermission(res, user, Permissions.catalogImport)) return;
-    }
-
-    if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/admin/import`) {
+    if (url.pathname === `${env.apiBasePath}/admin/import/validate`
+      || url.pathname === `${env.apiBasePath}/admin/import`
+      || url.pathname === `${env.apiBasePath}/admin/import/stages`
+      || url.pathname.startsWith(`${env.apiBasePath}/admin/import/stages/`)) {
       if (!requirePermission(res, user, Permissions.catalogImport)) return;
     }
 

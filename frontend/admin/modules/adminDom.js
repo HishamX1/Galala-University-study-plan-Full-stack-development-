@@ -41,6 +41,7 @@ export const elements = {
     auditLogs: byId('auditLogList'),
     recycleBin: byId('recycleBinList'),
     importPreview: byId('importPreview'),
+    importStages: byId('importStages'),
     backupList: byId('backupList'),
     healthList: byId('healthList')
   },

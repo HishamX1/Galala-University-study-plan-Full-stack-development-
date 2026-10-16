@@ -6,6 +6,7 @@ export const cache = {
   auditLogs: [],
   recycleBin: [],
   backups: [],
+  importStages: [],
   systemHealth: null,
   courseSort: { key: 'code', direction: 'asc' }
 };
