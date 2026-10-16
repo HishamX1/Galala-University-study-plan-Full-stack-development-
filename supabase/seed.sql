@@ -82,7 +82,7 @@ insert into courses (name) values
   ('Differential Diagnosis 1 (for physiotherapy)'),
   ('Elective Course (5)'),
   ('Elective University (3)'),
-  ('Graduation Research Project');
+  ('Graduation Research Project')
 on conflict (name) do nothing;
 
 -- Step 4: add credits if the column does not exist yet
