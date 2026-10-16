@@ -17,6 +17,8 @@
     "test:admin-routes": "node scripts/admin-route-controller-test.js",
     "test:admin-ops-repositories": "node scripts/admin-ops-repository-test.js",
     "test:recycle-bin": "node scripts/recycle-bin-regression-test.js",
+    "test:admin-transactions": "node scripts/admin-transaction-integration-test.js",
+    "check:admin-transactions": "node --check scripts/admin-transaction-integration-test.js",
     "test:db-guard": "node scripts/test-database-guard-test.js",
     "test:admin-import": "node scripts/admin-import-security-test.js",
     "test:student-catalog-xss": "node scripts/student-catalog-xss-test.js",
