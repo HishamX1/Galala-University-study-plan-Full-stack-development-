@@ -85,11 +85,7 @@ insert into courses (name) values
   ('Graduation Research Project')
 on conflict (name) do nothing;
 
--- Step 4: add credits if the column does not exist yet
-alter table program_courses
-  add column if not exists credits smallint not null default 0;
-
--- Step 4 continued: insert program-specific course rows
+-- Insert program-specific course rows. Schema changes belong in migrations.
 insert into program_courses
 (program_id, course_id, code, year_no, semester_no, credits, is_required)
 values

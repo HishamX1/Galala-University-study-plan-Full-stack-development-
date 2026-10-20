@@ -48,10 +48,12 @@ Before deployment, from the repository root:
 ```bash
 npm ci
 npm run check
+npm run test:migration-preflight
+npm run db:preflight
 npm run doctor
 ```
 
-Apply the Supabase migrations, deploy the backend, then run `npm run bootstrap-super-admin` once from a controlled environment. Sign in as that account and create the remaining administrator and student users. Bootstrap is automatically disabled after the first account exists.
+The migration preflight is read-only and must report every repository migration as applied with no unexpected versions before a release is considered schema-ready. Review and apply pending migrations through the approved Supabase migration workflow; do not run production migrations just to make the preflight green. Then deploy the backend, verify the health route, and deploy the static frontend using [the release and recovery runbook](release-and-recovery-runbook.md). Bootstrap is a one-time controlled operation only for a new installation; do not repeat it on an existing deployment.
 
 - Render: `https://<backend>/` returns the landing page; verify authenticated `/api/health` as a Super Admin
 - Student UI: `https://<site>/student`
