@@ -119,6 +119,8 @@ jobs:
       - name: Run static and database-free regressions
         run: >-
           npm run check &&
+          npm run check:catalog-concurrency &&
+          npm run test:catalog-concurrency &&
           npm run check:migration-preflight &&
           npm run test:migration-preflight &&
           npm run check:import-staging &&

@@ -25,6 +25,20 @@ export function validateFacultyPatch(body) {
   return null;
 }
 
+export function validateExpectedVersion(body, fields = ['updatedAt']) {
+  if (body?.expectedVersion === undefined) return null;
+  const version = body.expectedVersion;
+  if (!version || typeof version !== 'object' || Array.isArray(version)) return 'Invalid expectedVersion';
+  const keys = Object.keys(version).sort();
+  if (keys.length !== fields.length || keys.some((key, index) => key !== [...fields].sort()[index])) return 'Invalid expectedVersion';
+  if (fields.some((field) => {
+    if (typeof version[field] !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/.test(version[field])) return true;
+    const parsed = new Date(version[field]);
+    return !Number.isFinite(parsed.valueOf()) || parsed.toISOString().slice(0, 23) !== version[field].slice(0, 23);
+  })) return 'Invalid expectedVersion';
+  return null;
+}
+
 export function validateProgram(body) {
   if (!isPositiveInt(body?.facultyId)) return 'Invalid facultyId';
   if (typeof body?.name !== 'string' || body.name.trim().length < 2) return 'Invalid program name';

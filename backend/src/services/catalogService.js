@@ -2,9 +2,10 @@ import { query, withPostgresClient } from '../db/client.js';
 import { logAdminAction } from './adminOpsService.js';
 import { findActiveFaculty, insertFaculty, listActiveFaculties, listActiveFacultyProgramCourseIds, softDeleteFaculty, updateActiveFaculty } from '../repositories/facultyRepository.js';
 import { findActiveProgram, insertProgram, listActivePrograms, softDeleteProgram, softDeleteProgramsForFaculty, updateActiveProgram } from '../repositories/programRepository.js';
-import { findActiveProgramCourseDetail, findActiveProgramCourseSummary, findDuplicateProgramCourse, findProgramCourseWithCourse, insertProgramCourse, listActiveProgramCourseSummaries, listActiveProgramCourses, programCourseExists, programCourseRecordExists, softDeleteProgramCourse, softDeleteProgramCourses, updateProgramCourseRow } from '../repositories/programCourseRepository.js';
+import { findActiveProgramCourseDetail, findActiveProgramCourseSummary, findDuplicateProgramCourse, findProgramCourseWithCourse, insertProgramCourse, listActiveProgramCourseSummaries, listActiveProgramCourses, programCourseExists, programCourseRecordExists, softDeleteProgramCourse, softDeleteProgramCourses, touchProgramCourse, updateProgramCourseRow } from '../repositories/programCourseRepository.js';
 import { updateCourse, upsertCourse } from '../repositories/courseRepository.js';
 import { createPrerequisiteRow, listActivePrerequisiteRows, listRelationshipImpactRows, replacePrerequisiteRows, softDeletePrerequisiteRow, softDeletePrerequisitesForCourses, updatePrerequisiteVisibilityRow } from '../repositories/prerequisiteRepository.js';
+import { AppError } from '../utils/errors.js';
 
 function duplicate(error) {
   return String(error?.code) === '23505';
@@ -19,8 +20,18 @@ function toInt(value) {
   return Number(value);
 }
 
+function timestamp(value) {
+  if (value == null) return null;
+  if (typeof value === 'string') return value;
+  return value.toISOString();
+}
+
+function staleWrite() {
+  return new AppError('This record changed since you loaded it. Refresh the catalog, compare the latest values, then retry.', 409, 'STALE_WRITE');
+}
+
 function mapFaculty(row) {
-  return { id: toInt(row.id), name: row.name };
+  return { id: toInt(row.id), name: row.name, version: { updatedAt: timestamp(row.updated_at) } };
 }
 
 function mapProgram(row) {
@@ -28,7 +39,8 @@ function mapProgram(row) {
     id: toInt(row.id),
     facultyId: toInt(row.faculty_id),
     name: row.name,
-    durationYears: toInt(row.duration_years)
+    durationYears: toInt(row.duration_years),
+    version: { updatedAt: timestamp(row.updated_at) }
   };
 }
 
@@ -54,6 +66,7 @@ function mapProgramCourse(row, prerequisiteRelations = []) {
     credits: toInt(row.credits),
     isRequired: row.is_required,
     description: row.description ?? null,
+    version: { updatedAt: timestamp(row.updated_at), relatedUpdatedAt: timestamp(row.course_updated_at) },
     prerequisiteCourseIds: prerequisiteRelations.map((relation) => relation.prerequisiteCourseId),
     prerequisiteRelations
   };
@@ -135,9 +148,10 @@ export async function updateFaculty(id, data) {
           await client.query('ROLLBACK');
           return false;
         }
-        const { rows, rowCount } = await updateActiveFaculty(id, data.name?.trim(), client);
+        const { rows, rowCount } = await updateActiveFaculty(id, data.name?.trim(), client, data.expectedVersion?.updatedAt);
         if (!rowCount) {
           await client.query('ROLLBACK');
+          if (data.expectedVersion && (await findActiveFaculty(id, client)).rowCount) throw staleWrite();
           return false;
         }
         await logAdminAction(client, { action: 'Updated Faculty', entity: 'faculty', entityId: id, oldValues: current.rows[0], newValues: rows[0], description: `Updated faculty ${rows[0].name}` });
@@ -154,7 +168,7 @@ export async function updateFaculty(id, data) {
   }
 }
 
-export async function deleteFaculty(id) {
+export async function deleteFaculty(id, expectedVersion) {
   return withPostgresClient(async (client) => {
     await client.query('BEGIN');
     try {
@@ -169,7 +183,12 @@ export async function deleteFaculty(id) {
         await softDeleteProgramCourses(childCourseIds, 'Parent faculty deleted', client);
       }
       await softDeleteProgramsForFaculty(id, client);
-      const { rowCount } = await softDeleteFaculty(id, client);
+      const { rowCount } = await softDeleteFaculty(id, client, expectedVersion?.updatedAt);
+      if (!rowCount) {
+        await client.query('ROLLBACK');
+        if (expectedVersion && (await findActiveFaculty(id, client)).rowCount) throw staleWrite();
+        return false;
+      }
       await logAdminAction(client, { action: 'Deleted Faculty', entity: 'faculty', entityId: id, oldValues: current.rows[0], description: `Moved faculty ${current.rows[0].name} to recycle bin` });
       await client.query('COMMIT');
       return rowCount > 0;
@@ -210,9 +229,10 @@ export async function updateProgram(id, data) {
     return await withPostgresClient(async (client) => {
       await client.query('BEGIN');
       try {
-        const { rows, rowCount } = await updateActiveProgram(id, data, client);
+        const { rows, rowCount } = await updateActiveProgram(id, data, client, data.expectedVersion?.updatedAt);
         if (!rowCount) {
           await client.query('ROLLBACK');
+          if (data.expectedVersion && (await findActiveProgram(id, client)).rowCount) throw staleWrite();
           return false;
         }
         await logAdminAction(client, { action: 'Updated Program', entity: 'program', entityId: id, newValues: rows[0], description: `Updated program ${rows[0].name}` });
@@ -246,7 +266,7 @@ export async function getProgramDeleteImpact(id) {
   });
 }
 
-export async function deleteProgram(id) {
+export async function deleteProgram(id, expectedVersion) {
   return withPostgresClient(async (client) => {
     await client.query('BEGIN');
     try {
@@ -261,7 +281,12 @@ export async function deleteProgram(id) {
         await softDeletePrerequisitesForCourses(programCourseIds, 'Parent program deleted', client);
         await softDeleteProgramCourses(programCourseIds, 'Parent program deleted', client);
       }
-      const { rowCount } = await softDeleteProgram(id, client);
+      const { rowCount } = await softDeleteProgram(id, client, expectedVersion?.updatedAt);
+      if (!rowCount) {
+        await client.query('ROLLBACK');
+        if (expectedVersion && (await findActiveProgram(id, client)).rowCount) throw staleWrite();
+        return false;
+      }
       await logAdminAction(client, { action: 'Deleted Program', entity: 'program', entityId: id, oldValues: current.rows[0], description: `Moved program ${current.rows[0].name} to recycle bin` });
       await client.query('COMMIT');
       return rowCount > 0;
@@ -325,17 +350,24 @@ export async function updateProgramCourse(id, data) {
           }
         }
 
-        if (data.name !== undefined || data.description !== undefined) {
-          await updateCourse(current.rows[0].course_id, data.name?.trim(), cleanText(data.description), client);
+        const rowUpdate = await updateProgramCourseRow(id, data, client, data.expectedVersion?.updatedAt);
+        if (!rowUpdate.rowCount) {
+          await client.query('ROLLBACK');
+          if (data.expectedVersion && (await findProgramCourseWithCourse(id, client)).rowCount) throw staleWrite();
+          return false;
         }
 
-        await updateProgramCourseRow(id, data, client);
+        if (data.name !== undefined || data.description !== undefined) {
+          const courseUpdate = await updateCourse(current.rows[0].course_id, data.name?.trim(), cleanText(data.description), client, data.expectedVersion?.relatedUpdatedAt);
+          if (!courseUpdate.rowCount) throw staleWrite();
+        }
 
         if (Array.isArray(data.prerequisiteCourseIds)) {
           await replacePrerequisites(client, id, data.prerequisiteCourseIds);
         }
 
-        await logAdminAction(client, { action: 'Updated Course', entity: 'course', entityId: id, oldValues: current.rows[0], newValues: data, description: `Updated course ${data.code || current.rows[0].code}` });
+        const { expectedVersion: _expectedVersion, ...auditValues } = data;
+        await logAdminAction(client, { action: 'Updated Course', entity: 'course', entityId: id, oldValues: current.rows[0], newValues: auditValues, description: `Updated course ${data.code || current.rows[0].code}` });
         await client.query('COMMIT');
         return getProgramCourseById(id);
       } catch (error) {
@@ -375,7 +407,7 @@ export async function getProgramCourseDeleteImpact(id) {
   });
 }
 
-export async function deleteProgramCourse(id) {
+export async function deleteProgramCourse(id, expectedVersion) {
   return withPostgresClient(async (client) => {
     await client.query('BEGIN');
     try {
@@ -385,7 +417,12 @@ export async function deleteProgramCourse(id) {
         return false;
       }
       await softDeletePrerequisitesForCourses([id], 'Related course deleted', client);
-      const { rowCount } = await softDeleteProgramCourse(id, client);
+      const { rowCount } = await softDeleteProgramCourse(id, client, expectedVersion?.updatedAt);
+      if (!rowCount) {
+        await client.query('ROLLBACK');
+        if (expectedVersion && (await findActiveProgramCourseSummary(id, client)).rowCount) throw staleWrite();
+        return false;
+      }
       await logAdminAction(client, { action: 'Deleted Course', entity: 'course', entityId: id, oldValues: current.rows[0], description: `Moved course ${current.rows[0].code} to recycle bin` });
       await client.query('COMMIT');
       return rowCount > 0;
@@ -401,12 +438,14 @@ export async function getPrerequisites(programCourseId) {
   return (map.get(programCourseId) || []).map((relation) => relation.prerequisiteCourseId);
 }
 
-export async function updatePrerequisites(programCourseId, prerequisiteCourseIds) {
+export async function updatePrerequisites(programCourseId, prerequisiteCourseIds, expectedUpdatedAt) {
   await withPostgresClient(async (client) => {
     await client.query('BEGIN');
     try {
-      if (!(await programCourseExists(programCourseId, client))) {
+      const touched = await touchProgramCourse(programCourseId, client, expectedUpdatedAt);
+      if (!touched.rowCount) {
         await client.query('ROLLBACK');
+        if (expectedUpdatedAt && await programCourseExists(programCourseId, client)) throw staleWrite();
         return false;
       }
       await replacePrerequisites(client, programCourseId, prerequisiteCourseIds);
@@ -420,12 +459,14 @@ export async function updatePrerequisites(programCourseId, prerequisiteCourseIds
   return getPrerequisites(programCourseId);
 }
 
-export async function addPrerequisiteRelation(programCourseId, prerequisiteCourseId) {
+export async function addPrerequisiteRelation(programCourseId, prerequisiteCourseId, expectedUpdatedAt) {
   if (Number(programCourseId) === Number(prerequisiteCourseId)) throw new Error('FK_SELF_RELATION');
   try {
     return await withPostgresClient(async (client) => {
       await client.query('BEGIN');
       try {
+        const touched = await touchProgramCourse(programCourseId, client, expectedUpdatedAt);
+        if (!touched.rowCount && expectedUpdatedAt && await programCourseExists(programCourseId, client)) throw staleWrite();
         const rows = [await createPrerequisiteRow(programCourseId, prerequisiteCourseId, client)];
         await logAdminAction(client, { action: 'Created Relation', entity: 'relation', entityId: rows[0].id, newValues: rows[0], description: 'Created prerequisite relationship' });
         await client.query('COMMIT');
@@ -442,11 +483,17 @@ export async function addPrerequisiteRelation(programCourseId, prerequisiteCours
   }
 }
 
-export async function deletePrerequisiteRelation(programCourseId, prerequisiteCourseId) {
+export async function deletePrerequisiteRelation(programCourseId, prerequisiteCourseId, expectedUpdatedAt) {
   return withPostgresClient(async (client) => {
     await client.query('BEGIN');
     try {
+      const touched = await touchProgramCourse(programCourseId, client, expectedUpdatedAt);
+      if (!touched.rowCount && expectedUpdatedAt && await programCourseExists(programCourseId, client)) throw staleWrite();
       const { rows, rowCount } = await softDeletePrerequisiteRow(programCourseId, prerequisiteCourseId, client);
+      if (!rowCount) {
+        await client.query('ROLLBACK');
+        return false;
+      }
       if (rowCount) await logAdminAction(client, { action: 'Deleted Relation', entity: 'relation', entityId: rows[0].id, oldValues: rows[0], description: 'Moved prerequisite relationship to recycle bin' });
       await client.query('COMMIT');
       return rowCount > 0;
@@ -457,11 +504,17 @@ export async function deletePrerequisiteRelation(programCourseId, prerequisiteCo
   });
 }
 
-export async function updatePrerequisiteVisibility(programCourseId, prerequisiteCourseId, visibleToStudents) {
+export async function updatePrerequisiteVisibility(programCourseId, prerequisiteCourseId, visibleToStudents, expectedUpdatedAt) {
   return withPostgresClient(async (client) => {
     await client.query('BEGIN');
     try {
+      const touched = await touchProgramCourse(programCourseId, client, expectedUpdatedAt);
+      if (!touched.rowCount && expectedUpdatedAt && await programCourseExists(programCourseId, client)) throw staleWrite();
       const { rows, rowCount } = await updatePrerequisiteVisibilityRow(programCourseId, prerequisiteCourseId, visibleToStudents, client);
+      if (!rowCount) {
+        await client.query('ROLLBACK');
+        return false;
+      }
       if (rowCount) await logAdminAction(client, { action: visibleToStudents ? 'Restored Relation Visibility' : 'Hidden Relation', entity: 'relation', entityId: rows[0].id, newValues: rows[0], description: `Relation ${visibleToStudents ? 'shown to' : 'hidden from'} students` });
       await client.query('COMMIT');
       return rowCount > 0;

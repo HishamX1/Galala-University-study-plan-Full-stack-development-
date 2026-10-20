@@ -67,17 +67,44 @@ async function installAuditFailure(action, entityId) {
 try {
   const faculty = await createFaculty({ name: facultyName });
   assert.ok(faculty?.id);
+  assert.ok(faculty.version?.updatedAt);
   fixture.facultyId = faculty.id;
   assert.equal(faculty.name, facultyName);
   assert.ok((await getFaculties()).some((item) => item.id === faculty.id));
 
-  const updatedFaculty = await updateFaculty(faculty.id, { name: updatedFacultyName });
+  const staleFacultyVersion = faculty.version;
+  const updatedFaculty = await updateFaculty(faculty.id, { name: updatedFacultyName, expectedVersion: staleFacultyVersion });
   assert.equal(updatedFaculty.name, updatedFacultyName);
+  assert.ok(updatedFaculty.version.updatedAt);
+  const parallelFacultyWrites = await Promise.allSettled([
+    updateFaculty(faculty.id, { name: `${updatedFacultyName} A`, expectedVersion: updatedFaculty.version }),
+    updateFaculty(faculty.id, { name: `${updatedFacultyName} B`, expectedVersion: updatedFaculty.version })
+  ]);
+  const winningFacultyWrite = parallelFacultyWrites.filter((result) => result.status === 'fulfilled');
+  const rejectedFacultyWrite = parallelFacultyWrites.filter((result) => result.status === 'rejected');
+  assert.equal(winningFacultyWrite.length, 1, 'only one simultaneous write with the same faculty revision may commit');
+  assert.equal(rejectedFacultyWrite.length, 1);
+  assert.equal(rejectedFacultyWrite[0].reason.code, 'STALE_WRITE');
+  const winningFacultyName = winningFacultyWrite[0].value.name;
+  await assert.rejects(() => deleteFaculty(faculty.id, staleFacultyVersion),
+    (error) => error.code === 'STALE_WRITE', 'a stale faculty delete must not soft-delete the current record');
+  assert.equal(await count('SELECT count(*)::int AS count FROM faculties WHERE id = $1 AND deleted_at IS NULL', [faculty.id]), 1);
+  await assert.rejects(() => updateFaculty(faculty.id, { name: facultyName, expectedVersion: staleFacultyVersion }),
+    (error) => error.code === 'STALE_WRITE', 'faculty updates reject a stale revision');
+  assert.equal((await getFaculties()).find((item) => item.id === faculty.id).name, winningFacultyName,
+    'a rejected stale faculty update must leave the committed value unchanged');
+  assert.equal(await count("SELECT count(*)::int AS count FROM admin_audit_logs WHERE action = 'Updated Faculty' AND entity_id = $1", [faculty.id]), 2,
+    'the rejected concurrent and stale writes must not create audit rows');
 
   const program = await createProgram({ facultyId: faculty.id, name: programName, durationYears: 4 });
   assert.ok(program?.id);
   fixture.programId = program.id;
-  assert.equal((await updateProgram(program.id, { name: updatedProgramName })).name, updatedProgramName);
+  const originalProgramVersion = program.version;
+  const updatedProgram = await updateProgram(program.id, { name: updatedProgramName, expectedVersion: originalProgramVersion });
+  assert.equal(updatedProgram.name, updatedProgramName);
+  assert.ok(updatedProgram.version.updatedAt);
+  await assert.rejects(() => deleteProgram(program.id, originalProgramVersion),
+    (error) => error.code === 'STALE_WRITE', 'a stale program delete must preserve its active hierarchy');
   assert.ok((await getPrograms(faculty.id)).some((item) => item.id === program.id && item.name === updatedProgramName));
 
   await assert.rejects(() => createProgramCourse({
@@ -107,6 +134,7 @@ try {
     fixture.programCourseIds.push(course.id);
     fixture.courseIds.push(course.courseId);
     assert.ok(course.id && course.courseId);
+    assert.ok(course.version?.updatedAt && course.version?.relatedUpdatedAt);
   }
   assert.deepEqual(await getPrerequisites(second.id), [first.id]);
   const listedProgramCourses = await getProgramCourses({ programId: program.id });
@@ -116,7 +144,10 @@ try {
   fixture.relationIds.push(relation.id);
   assert.equal(relation.courseId, third.id);
   assert.equal(await addPrerequisiteRelation(third.id, first.id), null, 'duplicate prerequisite keeps the established null result');
-  assert.equal(await updatePrerequisiteVisibility(third.id, first.id, false), true);
+  const thirdAfterRelationAdd = (await getProgramCourses({ programId: program.id }, { includeHidden: true })).find((course) => course.id === third.id);
+  assert.equal(await updatePrerequisiteVisibility(third.id, first.id, false, thirdAfterRelationAdd.version.updatedAt), true);
+  await assert.rejects(() => updatePrerequisiteVisibility(third.id, first.id, true, thirdAfterRelationAdd.version.updatedAt),
+    (error) => error.code === 'STALE_WRITE', 'relation changes reject a stale owning-course revision');
   const hiddenCatalog = await getProgramCourses({ programId: program.id }, { includeHidden: true });
   assert.equal(hiddenCatalog.find((course) => course.id === third.id).prerequisiteRelations[0].visibleToStudents, false);
   assert.equal(await updatePrerequisiteVisibility(third.id, first.id, true), true);
@@ -128,9 +159,32 @@ try {
     code: `AR1BU${suffix}`,
     description: 'updated fixture B',
     credits: 4,
-    prerequisiteCourseIds: [first.id, third.id]
+    prerequisiteCourseIds: [first.id, third.id],
+    expectedVersion: second.version
   });
   assert.equal(updatedSecond.name, `AR1 Course B Updated ${suffix}`);
+  assert.deepEqual(new Set(await getPrerequisites(second.id)), new Set([first.id, third.id]));
+
+  await assert.rejects(() => updateProgramCourse(second.id, {
+    name: `AR1 Course B Related-Stale ${suffix}`,
+    expectedVersion: { updatedAt: updatedSecond.version.updatedAt, relatedUpdatedAt: second.version.relatedUpdatedAt }
+  }), (error) => error.code === 'STALE_WRITE', 'course updates also reject a stale shared-course revision');
+  const unchangedAfterRelatedStale = (await getProgramCourses({ programId: program.id })).find((course) => course.id === second.id);
+  assert.equal(unchangedAfterRelatedStale.name, `AR1 Course B Updated ${suffix}`);
+  assert.equal(unchangedAfterRelatedStale.version.updatedAt, updatedSecond.version.updatedAt,
+    'the program-course revision bump must roll back when the related shared-course revision is stale');
+
+  await assert.rejects(() => updateProgramCourse(second.id, {
+    name: `AR1 Course B Stale ${suffix}`, code: `AR1BS${suffix}`, description: 'must not overwrite',
+    expectedVersion: second.version
+  }), (error) => error.code === 'STALE_WRITE', 'course updates reject stale row revisions');
+  const unchangedAfterStaleCourse = (await rows(`SELECT pc.code,c.name,c.description
+    FROM program_courses pc JOIN courses c ON c.id=pc.course_id WHERE pc.id=$1`, [second.id]))[0];
+  assert.equal(unchangedAfterStaleCourse.code, `AR1BU${suffix}`);
+  assert.equal(unchangedAfterStaleCourse.name, `AR1 Course B Updated ${suffix}`);
+  assert.equal(unchangedAfterStaleCourse.description, 'updated fixture B');
+  await assert.rejects(() => deleteProgramCourse(second.id, second.version),
+    (error) => error.code === 'STALE_WRITE', 'a stale course delete must roll back its relation soft-deletes');
   assert.deepEqual(new Set(await getPrerequisites(second.id)), new Set([first.id, third.id]));
 
   await assert.rejects(() => updatePrerequisites(second.id, [Number.MAX_SAFE_INTEGER]), (error) => error.code === '23503');

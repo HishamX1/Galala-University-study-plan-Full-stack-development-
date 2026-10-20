@@ -49,6 +49,7 @@ export async function request(path, options = {}) {
         error.status = res.status;
         error.code = data.code;
         error.data = data;
+        if (data.code === 'STALE_WRITE') error.noRetry = true;
         if (path.startsWith('/admin/import') && [409, 410, 422, 429].includes(res.status)) error.noRetry = true;
         if (res.status === 401) {
           window.location.assign('../admin-login.html');
