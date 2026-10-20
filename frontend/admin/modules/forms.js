@@ -110,7 +110,8 @@ async function coursePatch(course) {
     name: result.name.trim(),
     credits: Number(result.credits),
     description: result.description.trim() || null,
-    prerequisiteCourseIds: mapCodesToIds(parsePrerequisiteCodes(result.prerequisites))
+    prerequisiteCourseIds: mapCodesToIds(parsePrerequisiteCodes(result.prerequisites)),
+    expectedVersion: course.version
   };
 }
 
@@ -227,7 +228,7 @@ async function openRelationManager(course) {
             const prerequisiteCourseId = type === 'prerequisite' ? selectedCourseId : baseCourseId;
             await request(`/program-courses/${courseId}/prerequisites`, {
               method: 'POST',
-              body: JSON.stringify({ prerequisiteCourseId })
+              body: JSON.stringify({ prerequisiteCourseId, expectedVersion: findCourse(courseId)?.version })
             });
             setMessage('success', 'Relationship added.');
             await refreshRelationManager(root, baseCourseId);
@@ -239,7 +240,7 @@ async function openRelationManager(course) {
             const visibleToStudents = toggleBtn.dataset.visible === 'true';
             await request(`/program-courses/${courseId}/prerequisites/${prerequisiteId}/visibility`, {
               method: 'PUT',
-              body: JSON.stringify({ visibleToStudents })
+              body: JSON.stringify({ visibleToStudents, expectedVersion: findCourse(courseId)?.version })
             });
             setMessage('success', `Relation ${visibleToStudents ? 'shown to' : 'hidden from'} students.`);
             await refreshRelationManager(root, course.id);
@@ -248,12 +249,17 @@ async function openRelationManager(course) {
           if (removeBtn) {
             const courseId = Number(removeBtn.dataset.dialogRemove);
             const prerequisiteId = Number(removeBtn.dataset.prerequisiteId);
-            await request(`/program-courses/${courseId}/prerequisites/${prerequisiteId}`, { method: 'DELETE' });
+            await request(`/program-courses/${courseId}/prerequisites/${prerequisiteId}`, {
+              method: 'DELETE', body: JSON.stringify({ expectedVersion: findCourse(courseId)?.version })
+            });
             setMessage('success', 'Relationship removed.');
             await refreshRelationManager(root, course.id);
           }
         } catch (error) {
-          setMessage('error', error.message);
+          if (error.code === 'STALE_WRITE') await refreshRelationManager(root, course.id);
+          setMessage('error', error.code === 'STALE_WRITE'
+            ? 'This item changed while you were editing. The catalog has been refreshed; compare the latest values and reapply your change if appropriate.'
+            : error.message);
         }
       });
     }
@@ -267,7 +273,7 @@ async function patchFor(kind, id) {
       title: 'Edit Faculty',
       fields: [{ name: 'name', label: 'Faculty Name', value: current?.name || '', required: true }]
     });
-    return result && { name: result.name.trim() };
+    return result && { name: result.name.trim(), expectedVersion: current?.version };
   }
 
   if (kind === 'program') {
@@ -280,7 +286,7 @@ async function patchFor(kind, id) {
         { name: 'durationYears', label: 'Duration Years', type: 'select', value: current?.durationYears || 4, options: [{ value: 4, label: '4' }, { value: 5, label: '5' }], required: true }
       ]
     });
-    return result && { facultyId: Number(result.facultyId), name: result.name.trim(), durationYears: Number(result.durationYears) };
+    return result && { facultyId: Number(result.facultyId), name: result.name.trim(), durationYears: Number(result.durationYears), expectedVersion: current?.version };
   }
 
   const current = cache.programCourses.find((item) => Number(item.id) === Number(id));
@@ -313,7 +319,7 @@ export function bindCrudDelegates() {
         const visibleToStudents = toggleBtn.dataset.visible === 'true';
         await request(`/program-courses/${courseId}/prerequisites/${prerequisiteId}/visibility`, {
           method: 'PUT',
-          body: JSON.stringify({ visibleToStudents })
+          body: JSON.stringify({ visibleToStudents, expectedVersion: findCourse(courseId)?.version })
         });
         setMessage('success', `Relation ${visibleToStudents ? 'shown to' : 'hidden from'} students.`);
       }
@@ -332,14 +338,24 @@ export function bindCrudDelegates() {
         const kind = deleteBtn.dataset.kind;
         const confirmed = await confirmDeletion(kind, id);
         if (!confirmed) return;
-        await request(`/${endpointFor(kind)}/${id}`, { method: 'DELETE' });
+        const current = kind === 'faculty'
+          ? cache.faculties.find((item) => Number(item.id) === id)
+          : kind === 'program'
+            ? cache.programs.find((item) => Number(item.id) === id)
+            : cache.programCourses.find((item) => Number(item.id) === id);
+        await request(`/${endpointFor(kind)}/${id}`, {
+          method: 'DELETE', body: JSON.stringify({ expectedVersion: current?.version })
+        });
         setMessage('success', `${kind} deleted.`);
       }
 
       await loadRelations();
       await loadAdminOps();
     } catch (error) {
-      setMessage('error', error.message);
+      if (error.code === 'STALE_WRITE') await loadRelations();
+      setMessage('error', error.code === 'STALE_WRITE'
+        ? 'This item changed while you were editing. The catalog has been refreshed; compare the latest values and reopen the edit to reapply your change.'
+        : error.message);
     }
   });
 }
