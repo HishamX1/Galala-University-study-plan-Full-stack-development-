@@ -63,6 +63,59 @@ jobs:
       - name: Seed canonical catalog fixtures
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/seed.sql
 
+      - name: Rehearse disposable PostgreSQL dump and restore
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Refuse to run outside this workflow's explicitly disposable service DB.
+          [[ "${GITHUB_ACTIONS:-}" == "true" ]]
+          [[ "${DATABASE_URL:-}" == "postgresql://postgres:postgres@127.0.0.1:5432/gu_pt_phase1_test" ]]
+          [[ "${TEST_DATABASE_URL:-}" == "$DATABASE_URL" ]]
+          [[ "${ALLOW_DESTRUCTIVE_TEST_DB:-}" == "I_CONFIRM_DISPOSABLE_LOCAL_DATABASE" ]]
+
+          container_id="$(docker ps --filter ancestor=postgres:16 --format '{{.ID}}' | head -n 1)"
+          test -n "$container_id"
+          dump_file="$RUNNER_TEMP/gu-pt-recovery-drill.dump"
+          restore_db="gu_pt_recovery_drill_test"
+
+          if docker exec "$container_id" psql -U postgres -d postgres -Atqc \
+            "SELECT 1 FROM pg_database WHERE datname = '$restore_db'" | grep -qx 1; then
+            echo "Refusing to overwrite an existing recovery-drill database."
+            exit 1
+          fi
+
+          cleanup() {
+            docker exec "$container_id" dropdb --if-exists -U postgres "$restore_db" >/dev/null 2>&1 || true
+            rm -f "$dump_file"
+          }
+          trap cleanup EXIT
+
+          docker exec "$container_id" pg_dump -U postgres -d gu_pt_phase1_test --format=custom > "$dump_file"
+          docker exec "$container_id" createdb -U postgres "$restore_db"
+          docker exec -i "$container_id" pg_restore -U postgres -d "$restore_db" --no-owner --no-privileges < "$dump_file"
+
+          source_counts="$(docker exec "$container_id" psql -U postgres -d gu_pt_phase1_test -Atqc \
+            "SELECT 'faculties=' || count(*) FROM public.faculties
+             UNION ALL SELECT 'programs=' || count(*) FROM public.programs
+             UNION ALL SELECT 'courses=' || count(*) FROM public.courses
+             UNION ALL SELECT 'program_courses=' || count(*) FROM public.program_courses
+             UNION ALL SELECT 'course_prerequisites=' || count(*) FROM public.course_prerequisites
+             ORDER BY 1")"
+          restored_counts="$(docker exec "$container_id" psql -U postgres -d "$restore_db" -Atqc \
+            "SELECT 'faculties=' || count(*) FROM public.faculties
+             UNION ALL SELECT 'programs=' || count(*) FROM public.programs
+             UNION ALL SELECT 'courses=' || count(*) FROM public.courses
+             UNION ALL SELECT 'program_courses=' || count(*) FROM public.program_courses
+             UNION ALL SELECT 'course_prerequisites=' || count(*) FROM public.course_prerequisites
+             ORDER BY 1")"
+
+          if [[ "$source_counts" != "$restored_counts" ]]; then
+            echo "Restored migration/catalog counts differ from the source database."
+            exit 1
+          fi
+          echo "Disposable PostgreSQL dump/restore preserved migration and catalog row counts."
+
       - name: Run static and database-free regressions
         run: >-
           npm run check &&
