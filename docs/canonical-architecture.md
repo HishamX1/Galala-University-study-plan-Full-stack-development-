@@ -30,6 +30,6 @@ The UI derives year and semester groupings from `program_courses.year_no` and `p
 - Frontend calls only `/api/*`.
 - Backend is the only code that connects to Supabase.
 - File-based stores and static data fallbacks are not part of the live runtime.
-- Schema ownership stays in `supabase/migrations/20260420120000_init_schema.sql`.
+- Schema ownership stays in the complete, ordered SQL migration chain under `supabase/migrations/`. Apply every migration in filename order; no individual migration file represents the complete current schema. `npm run db:preflight` compares repository migration timestamps with Supabase's migration-history table and is read-only.
 
-The repository-root tree is canonical. `modernization/` is an older duplicate retained temporarily for migration verification and is not a runtime source.
+The repository-root tree is canonical. The previously referenced `modernization/` duplicate is absent from the current checkout and is not part of the runtime.

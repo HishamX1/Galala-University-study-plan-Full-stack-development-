@@ -47,6 +47,20 @@ export async function getDatabaseReadiness() {
   } catch (error) { return { connected: false, error: databaseDiagnosticMessage(error) }; }
 }
 
+export async function getMigrationHistoryVersions() {
+  try {
+    await ensureDataStore();
+    const history = await query("SELECT to_regclass('supabase_migrations.schema_migrations') AS table_name");
+    if (!history.rows[0]?.table_name) return { available: false, reason: 'Migration history table is not available.' };
+
+    const result = await query('SELECT version::text FROM supabase_migrations.schema_migrations ORDER BY version');
+    return { available: true, versions: result.rows.map((row) => String(row.version)) };
+  } catch (error) {
+    const safeError = connectionError(error);
+    return { available: false, reason: databaseDiagnosticMessage(safeError) };
+  }
+}
+
 export async function query(sql, params = []) {
   const activePool = await getPool();
   return activePool.query(sql, params);

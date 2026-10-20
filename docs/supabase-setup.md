@@ -1,28 +1,53 @@
 # Supabase Setup
 
-The app expects the canonical Supabase schema already agreed for this project.
+The app requires the complete schema represented by every ordered migration in `../supabase/migrations/`. Runtime startup does not apply migrations.
 
-## Schema
+## Migration workflow
 
-Use:
+Apply every migration in filename order. The current required migrations are:
 
-- `../../supabase/migrations/20260420120000_init_schema.sql`
+- `20260420120000_init_schema.sql`
+- `20260624090000_course_prerequisite_visibility.sql`
+- `20260712090000_admin_course_integrity.sql`
+- `20260712100000_admin_operations.sql`
+- `20260715110000_admin_backup_xlsx.sql`
+- `20260718090000_authentication.sql`
+- `20260809090000_account_recovery_and_communications.sql`
+- `20260811090000_dashboard_profiles.sql`
+- `20260812090000_catalog_import_staging.sql`
 
-This creates:
+For a new Supabase environment, apply these reviewed migrations using the project's approved Supabase migration workflow so `supabase_migrations.schema_migrations` records the applied versions. Before applying to any existing/shared project, review the pending SQL and confirm the target project and a recovery plan. Never replay a migration merely because it is absent from history: inspect whether its effects were already applied and reconcile through the approved migration process. Do not manually insert or edit migration-history rows.
 
-- `faculties`
-- `programs`
-- `courses`
-- `program_courses`
-- `course_prerequisites`
+When the Supabase CLI is installed and linked to the intended project, the tracked workflow is:
+
+```powershell
+supabase migration list --linked
+supabase db push --dry-run --linked
+# Review the target project and every pending migration before approving the write:
+supabase db push --linked
+supabase migration list --linked
+npm run db:preflight
+```
+
+`supabase db push --linked` changes the linked database. Do not run it against production without a separately approved release and migration review. If migrations were previously run manually in the SQL editor, stop before pushing: the schema may already have changed without matching migration-history entries. Do not replay them or fabricate history rows; have the database owner reconcile the recorded state through the approved process.
+
+Run this read-only check before and after migration application:
+
+```bash
+npm run db:preflight
+```
+
+It compares the 14-digit versions in the repository filenames with the Supabase migration-history table. It exits non-zero when history is missing/unreadable, repository migrations are unrecorded, or the database records versions absent from the checkout. It never applies SQL and does not prove the database schema, Supabase roles/RLS, or production configuration are otherwise correct.
+
+The disposable PostgreSQL integration workflow applies all migration SQL files in sorted filename order with `psql`; that path does not create Supabase CLI migration history, so the migration-history preflight is not a CI assertion. The workflow separately verifies migration SQL by applying it and running database-backed tests. For a local database initialized with Supabase CLI, use its local migration workflow; the direct `psql` fixture procedure below is for integration tests and does not provide tracked migration history.
 
 ## Seed
 
-Use:
+Use only for a fresh/disposable environment or after an explicit data-impact review:
 
-- `../../supabase/seed.sql`
+- `../supabase/seed.sql`
 
-Apply it from the Supabase SQL editor or your preferred database workflow. The runtime app does not reset or migrate the database on startup.
+The seed loads catalog fixtures; it is not a production-data repair or migration mechanism. Do not seed a shared or production database as part of setup verification. The runtime app does not reset, seed, or migrate the database on startup.
 
 ## Backend Env
 
@@ -76,7 +101,7 @@ npm run test:catalog-crud
 npm run test:admin-import-staging
 ```
 
-The direct `psql` migration procedure above does not create Supabase CLI's migration-history bookkeeping table, so `npm run doctor` will report that specific metadata check as unavailable even when the local schema is present. Use the doctor for that check only when the database was initialized/tracked through the Supabase migration workflow; do not create fake history rows just to make the doctor green. When verification is complete, close any process using the DB and remove only this disposable local database with `dropdb -h 127.0.0.1 -p 5432 -U postgres gu_pt_phase1_test`.
+The direct `psql` migration procedure above does not create Supabase CLI's migration-history bookkeeping table, so `npm run db:preflight` and `npm run doctor` cannot verify which migrations were applied there and will fail that check even when schema objects exist. Do not create fake history rows to make the checks green. Use this direct-`psql` path for isolated integration testing; use the approved tracked Supabase migration workflow when you need migration-history verification. When verification is complete, close any process using the DB and remove only this disposable local database with `dropdb -h 127.0.0.1 -p 5432 -U postgres gu_pt_phase1_test`.
 
 The repository defines `.github/workflows/architecture-review-1-integration.yml`. GitHub Actions provisions a fresh PostgreSQL 16 service container per run, applies every canonical migration in filename order, loads `supabase/seed.sql`, runs the database-free regression suite, and then runs the guarded database-backed scripts, including import staging. The workflow uses only ephemeral job-local credentials and has read-only repository permissions; it does not use repository database secrets or connect to Supabase. The service container is discarded with the job. This validates SQL and behavior on PostgreSQL 16, but does not verify Supabase-managed roles, network configuration, provider-specific policies, or production data. Treat a successful CI run as integration evidence for this disposable PostgreSQL environment, not as proof of production readiness.
 

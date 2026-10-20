@@ -66,6 +66,8 @@ jobs:
       - name: Run static and database-free regressions
         run: >-
           npm run check &&
+          npm run check:migration-preflight &&
+          npm run test:migration-preflight &&
           npm run check:import-staging &&
           npm run check:admin-transactions &&
           npm run check:catalog-crud &&

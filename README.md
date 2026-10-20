@@ -4,7 +4,7 @@ This repository now has one live architecture:
 
 `Netlify frontend -> Backend API -> Supabase Postgres`
 
-The canonical application lives at the repository root. The untracked `modernization/` directory is an older duplicate kept temporarily for migration verification and is not part of the active runtime.
+The canonical application lives at the repository root. The previously referenced `modernization/` duplicate is absent from this checkout; root `backend/` and `frontend/` are the application trees present here.
 
 ## Runtime Entry Points
 
@@ -14,7 +14,7 @@ The canonical application lives at the repository root. The untracked `moderniza
 - Backend API: `backend/src/server.js`
 - Netlify config: `netlify.toml`
 - Render backend config: `render.yaml`
-- Supabase schema: `supabase/migrations/20260420120000_init_schema.sql`
+- Supabase schema: the complete ordered migration chain in `supabase/migrations/`
 - Supabase seed: `supabase/seed.sql`
 
 ## Canonical Schema
@@ -71,4 +71,4 @@ npm run check
 npm run smoke
 ```
 
-`npm run smoke` expects the backend to be running on port `4000` with a configured Supabase database.
+`npm run db:preflight` is a read-only check of the Supabase migration-history table. It requires `DATABASE_URL` and returns failure if migration history is missing, unreadable, or differs from the repository. It does not apply migrations. `npm run smoke` expects the backend to be running on port `4000` with a configured database.

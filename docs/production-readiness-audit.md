@@ -30,11 +30,13 @@ Reviewed the Node runtime, API routing, authentication bootstrap, database acces
 
 ## Remaining recommendations
 
-1. `npm audit --omit=dev` reports one high-severity direct dependency: `xlsx@0.18.5` (prototype pollution and ReDoS advisories; no npm fix is available). Keep imports restricted to trusted staff, retain the existing payload limit, and migrate to a maintained spreadsheet parser when feasible.
-2. Keep the Render dashboard secrets synchronized with `.env.production` during deployment. The local production doctor has verified the supplied Supabase connection and applied migration state.
+This audit is historical and was not re-run as a production readiness check on 2026-10-17. In particular, the dependency statement and readiness score below must not be treated as current evidence.
+
+1. The 2026-07-18 audit recorded `xlsx@0.18.5` as a direct high-severity dependency. The current locked dependency tree does not contain `xlsx`; it contains `exceljs@4.4.0` with transitive `uuid@8.3.2`. A fresh `npm audit --omit=dev` could not reach the npm advisory endpoint in this environment, so current advisory status is unverified. See [ExcelJS/uuid Security Risk Acceptance](security/exceljs-uuid-risk-acceptance.md).
+2. Keep the Render dashboard secrets synchronized with `.env.production` during deployment. The Supabase connectivity and migration-state statement in the 2026-07-18 scope is historical and was not reverified for this documentation refresh.
 3. Run the authenticated smoke test only against a non-production database or an isolated test tenant because it creates and deletes catalog data.
 4. Consider an automated CI job that runs `npm ci`, `npm run check`, `npm run doctor` with non-secret configuration validation, and `npm audit` on every deployment.
 
 ## Readiness score
 
-**92/100 for code and deployment configuration.** Local and production-mode configuration, Supabase connectivity, and migration state have been verified. The remaining deduction is the unresolved high-severity `xlsx` advisory.
+**92/100 was the score assigned on 2026-07-18 only.** It is not a current readiness verdict: production connectivity/migration state and the complete current dependency audit have not been reverified in this pass.

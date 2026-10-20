@@ -49,3 +49,11 @@ The in-process limiter is per backend instance; replace it with shared storage b
 - **Local environment limitation:** `npm run doctor` and direct access to the configured Supabase pooler remain unavailable in this sandbox (`EACCES`); no destructive fixture was run against Supabase. This does not negate the isolated PostgreSQL CI results. Use `docs/supabase-setup.md` for the guarded local-database procedure if local reproduction is needed.
 
 No production data was intentionally modified. No schema or API changes were made for verification.
+
+## Operational-readiness follow-up (2026-10-20)
+
+- The complete migration chain under `supabase/migrations/` is the schema authority. `supabase/seed.sql` now contains catalog fixture data only; the redundant `credits` column DDL was removed because that column is defined by the initial migration.
+- `npm run db:preflight` performs read-only comparison of repository migration timestamps against `supabase_migrations.schema_migrations`. `npm run doctor` uses the same comparison and fails when history is absent, unreadable, incomplete, or contains versions not present in the checkout. This checks migration bookkeeping, not actual schema drift, Supabase RLS/provider configuration, or production readiness.
+- The guarded direct-`psql` integration setup and CI apply SQL but do not populate Supabase migration history; they verify behavior through migration application and tests, not through this preflight. Do not fabricate history rows or blindly replay migrations applied outside the tracked workflow.
+- `docs/release-and-recovery-runbook.md` now covers release gates and recovery decisions. The application's backup history contains catalog snapshots only; a whole-database recovery capability and provider retention have not been verified or rehearsed.
+- Local verification for this follow-up: `npm run check`, `npm run check:migration-preflight`, `npm run test:migration-preflight`, and the database-free regression suite passed. PostgreSQL CI was not run for this follow-up, and no Supabase or production checks were performed. The migration preflight was not pointed at any database.

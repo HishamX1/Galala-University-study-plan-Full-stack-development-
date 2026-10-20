@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { env, validateStartupConfig } from '../backend/src/config/env.js';
 import { closePool, getDatabaseReadiness } from '../backend/src/db/client.js';
 import { countUsers } from '../backend/src/services/authService.js';
+import { getSchemaMigrationState } from './migration-preflight.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(__dirname, '..');
@@ -25,7 +26,17 @@ check(database.connected, 'Database connection', database.connected ? 'connected
 if (database.connected) {
   check(Boolean(database.faculties), 'Canonical catalog migration applied');
   check(Boolean(database.app_users && database.refresh_tokens), 'Authentication migration applied');
-  check(Boolean(database.migration_history), 'Supabase migration history available', database.migration_history ? 'migration history table found' : 'table unavailable; table checks used instead');
+  const migrationState = await getSchemaMigrationState();
+  if (!migrationState.available) {
+    check(false, 'Supabase migration history available', migrationState.reason);
+  } else {
+    check(migrationState.missing.length === 0 && migrationState.unexpected.length === 0, 'All repository migrations recorded as applied',
+      migrationState.missing.length
+        ? `missing ${migrationState.missing.join(', ')}`
+        : migrationState.unexpected.length
+          ? `unexpected ${migrationState.unexpected.join(', ')}`
+          : `${migrationState.migrations.length} migrations verified`);
+  }
   if (database.app_users && database.refresh_tokens) {
     const users = await countUsers();
     check(true, 'Bootstrap readiness', users ? `disabled safely (${users} user${users === 1 ? '' : 's'} exist)` : 'ready to create the first Super Admin');
