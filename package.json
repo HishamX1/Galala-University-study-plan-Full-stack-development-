@@ -35,6 +35,8 @@
     "test:error-disclosure": "node scripts/error-disclosure-test.js",
     "test:foundation": "node scripts/security-foundation-test.js",
     "doctor": "node scripts/doctor.js",
+    "check:deployment-doctor": "node --check scripts/doctor.js && node --check scripts/deployment-doctor-contract-test.js",
+    "test:deployment-doctor": "node scripts/deployment-doctor-contract-test.js",
     "db:preflight": "node scripts/migration-preflight.js",
     "test:migration-preflight": "node scripts/migration-preflight-test.js",
     "check:migration-preflight": "node --check scripts/migration-preflight.js && node --check scripts/migration-preflight-test.js",

@@ -1,8 +1,10 @@
 # Canonical Architecture
 
-The live runtime is intentionally small:
+The intended live runtime is intentionally small (frontend host confirmed by the owner; hosted settings still need read-only verification):
 
-`Netlify frontend -> Render backend API -> Supabase Postgres`
+`Vercel frontend -> Render backend API -> Supabase Postgres`
+
+The root `netlify.toml` is legacy configuration retained pending cleanup. It is not evidence of the active Vercel project's build, routing, security-header, environment, or deployment settings.
 
 ## Active Runtime
 

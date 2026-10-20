@@ -50,7 +50,7 @@ function isStateChanging(method) { return ['POST', 'PUT', 'PATCH', 'DELETE'].inc
 function hasSessionCookie(req) { return /(?:^|;\s*)gu_(?:access|refresh)=/.test(String(req.headers.cookie || '')); }
 function trustedStateChange(req) {
   // Cookie-authenticated mutations require an explicit approved Origin. This
-  // preserves credentialed Netlify/Render requests while rejecting blind CSRF.
+  // preserves credentialed cross-origin requests while rejecting blind CSRF.
   if (!isStateChanging(req.method) || !hasSessionCookie(req)) return true;
   return isAllowedCorsOrigin(req.headers.origin);
 }

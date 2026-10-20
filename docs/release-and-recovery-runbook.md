@@ -7,10 +7,11 @@ This runbook covers the root application and ordered Supabase migrations. It doe
 1. Confirm the release branch is based on the intended `main` commit, inspect the complete diff, and ensure no unrelated or secret-bearing files are included.
 2. Confirm the pull request CI is green, including the disposable PostgreSQL workflow. Run `npm ci`, `npm run check`, and the relevant root regression scripts. Do not substitute local syntax checks for PostgreSQL integration evidence.
 3. Review every pending SQL migration in filename order. Confirm it is additive/compatible with the application rollout, has no unreviewed destructive operation, and has a documented recovery decision. The repository has no automatic migration rollback mechanism.
-4. Confirm the target Supabase project through the approved operator workflow. Run `supabase migration list --linked` and `supabase db push --dry-run --linked`; review the target and exact pending migration list before any write. Never expose connection URLs or passwords in commands, screenshots, logs, or chat.
-5. Check required Render environment-variable presence and classification without displaying values; confirm production `NODE_ENV`, explicit CORS origin, secure cookies, and the frontend API origin/CSP alignment.
-6. After the database owner has approved and applied the reviewed migrations, run `npm run db:preflight` and `npm run doctor`. Do not deploy the backend if required migration history is missing, unexpected, or unverifiable.
-7. Deploy backend and frontend only through the approved release process. Do not run seed data or bootstrap commands on an existing deployment.
+4. For default read-only verification, confirm the linked target and run `supabase migration list --linked` and `npm run db:preflight`. These inspect migration bookkeeping only; they do not apply migrations. Never expose connection URLs or passwords in commands, screenshots, logs, or chat. Any migration application is a separate write operation and requires explicit project-owner approval, reviewed SQL, target confirmation, and a recovery plan as described in `supabase-setup.md`.
+5. In Render, check required environment-variable presence and classification without displaying values; confirm production `NODE_ENV`, explicit CORS origin, and secure cookies. Confirm that the allowed origin is the exact Vercel production origin and that `frontend/config.js` points to the intended Render `/api` URL.
+6. In Vercel, verify the connected repository and production branch, build/output settings for the root `frontend/` static files, and effective routes and security headers. Repository configuration does not prove dashboard state; record unavailable settings as blocked, not passed.
+7. After the database owner has approved and applied the reviewed migrations, run `npm run db:preflight` and `npm run doctor`. Do not deploy the backend if required migration history is missing, unexpected, or unverifiable. The doctor cannot inspect provider dashboards.
+8. Deploy backend and frontend only through the approved release process. Do not run seed data or bootstrap commands on an existing deployment.
 
 ## Post-release verification
 
@@ -22,7 +23,7 @@ This runbook covers the root application and ordered Supabase migrations. It doe
 
 ## Incident triage and recovery
 
-1. Record incident time, deployed commit, request/correlation IDs, affected workflow, and sanitized error class. Check Render/Netlify/Supabase provider status and logs through authorized dashboards; do not paste secrets or personal data into issue reports.
+1. Record incident time, deployed commit, request/correlation IDs, affected workflow, and sanitized error class. Check Render/Vercel/Supabase provider status and logs through authorized dashboards; do not paste secrets or personal data into issue reports.
 2. Stop repeated or destructive retries. Do not edit schema or production rows ad hoc. Identify whether the failure is application, configuration, migration, provider availability, or data integrity related.
 3. If the application release is the cause, use the hosting provider's approved rollback to the last known-good application version only after confirming compatibility with the current database schema. Do not automatically reverse a migration; the schema may be ahead of the application and migrations have no guaranteed down scripts.
 4. The application's admin backup feature stores catalog snapshots in `admin_backup_history`; it is not a whole-database backup and does not cover authentication/session, recovery, communications, or all operational data. Do not treat it as a complete disaster-recovery copy.

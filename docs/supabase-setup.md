@@ -18,20 +18,36 @@ Apply every migration in filename order. The current required migrations are:
 
 For a new Supabase environment, apply these reviewed migrations using the project's approved Supabase migration workflow so `supabase_migrations.schema_migrations` records the applied versions. Before applying to any existing/shared project, review the pending SQL and confirm the target project and a recovery plan. Never replay a migration merely because it is absent from history: inspect whether its effects were already applied and reconcile through the approved migration process. Do not manually insert or edit migration-history rows.
 
-When the Supabase CLI is installed and linked to the intended project, the tracked workflow is:
+### Read-only verification (default)
+
+The following commands inspect migration history and compare it with the repository. They do not apply migrations or change database state. Confirm that the CLI is linked to the intended project before reading its history:
 
 ```powershell
 supabase migration list --linked
+npm run db:preflight
+```
+
+`supabase migration list --linked` is read-only but contacts the linked project. `npm run db:preflight` reads the configured database's migration-history table. Neither command proves the hosted schema, RLS, or provider configuration is otherwise correct.
+
+### Migration application (separate, write operation)
+
+This is not part of verification. **Do not run `supabase db push --linked` unless the project owner has explicitly approved that specific production migration operation**, the target project is independently confirmed, every pending migration has been reviewed, and the recovery plan is ready. A CLI dry-run can be used during that separately approved release review, but it is not authorization to apply anything:
+
+```powershell
 supabase db push --dry-run --linked
-# Review the target project and every pending migration before approving the write:
+```
+
+Only after the above approvals and a separate explicit authorization to perform the write may the release operator apply migrations:
+
+```powershell
 supabase db push --linked
 supabase migration list --linked
 npm run db:preflight
 ```
 
-`supabase db push --linked` changes the linked database. Do not run it against production without a separately approved release and migration review. If migrations were previously run manually in the SQL editor, stop before pushing: the schema may already have changed without matching migration-history entries. Do not replay them or fabricate history rows; have the database owner reconcile the recorded state through the approved process.
+If migrations were previously run manually in the SQL editor, stop before pushing: the schema may already have changed without matching migration-history entries. Do not replay them or fabricate history rows; have the database owner reconcile the recorded state through the approved process.
 
-Run this read-only check before and after migration application:
+Run this read-only check for verification, and again after any separately authorized migration application:
 
 ```bash
 npm run db:preflight
@@ -55,8 +71,10 @@ The seed loads catalog fixtures; it is not a production-data repair or migration
 DATABASE_URL=
 PG_SSL=true
 API_BASE_PATH=/api
-CORS_ORIGIN=https://your-netlify-site.netlify.app
+CORS_ORIGIN=https://your-vercel-production-domain.example
 ```
+
+Replace the example with the exact HTTPS production origin assigned to the Vercel frontend. Do not use a wildcard. The frontend host and this backend allowlist must agree; preview origins should be added only when explicitly required and approved.
 
 ## Verification
 

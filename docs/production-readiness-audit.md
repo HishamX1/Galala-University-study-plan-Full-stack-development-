@@ -40,3 +40,7 @@ This audit is historical and was not re-run as a production readiness check on 2
 ## Readiness score
 
 **92/100 was the score assigned on 2026-07-18 only.** It is not a current readiness verdict: production connectivity/migration state and the complete current dependency audit have not been reverified in this pass.
+
+## Hosting and evidence correction (2026-10-21)
+
+The project owner confirmed that Vercel—not Netlify—is the active frontend host. The Netlify references above describe the earlier configuration and are not current deployment evidence. Root `netlify.toml` is retained legacy configuration pending a separate cleanup. The deployment doctor now labels it legacy and states that Vercel dashboard settings are external and unverified. See `docs/stage-3-security-production-evidence.md` for current Stage 3 results and blockers.

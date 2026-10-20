@@ -1,9 +1,13 @@
 # ExcelJS/uuid Security Risk Acceptance
 
 - Original review date: 2026-10-05
-- Evidence refreshed: 2026-10-17 (repository dependency tree and upstream advisory/release pages)
+- Evidence refreshed: 2026-10-21 (repository dependency tree, upstream advisory, and fresh audit attempt)
 - Status: Accepted temporarily / deferred remediation
 - Scope: Server-side admin XLSX workflows only
+
+### Evidence update (2026-10-21)
+
+The installed tree was rechecked with `npm ls exceljs uuid --all`: `exceljs@4.4.0` resolves `uuid@8.3.2`. The inspected ExcelJS implementation imports and calls `v4()` for conditional-formatting identifiers; this bounds the inspected call path but does not prove the dependency is safe. The version remains inside the advisory's affected range, so the package-level advisory remains present. A fresh `npm audit --omit=dev` was attempted with an isolated temporary cache; the npm advisory endpoint failed, so no audit findings were returned and no package can be declared clear on that basis. The temporary log was written successfully outside the repository. No dependency change was made. Current advisory: [GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq). Retry the audit when registry access is available; this update does not supersede the temporary risk acceptance above.
 
 ## Advisory
 
@@ -30,8 +34,8 @@ These controls do not remove the dependency advisory, but they materially constr
 
 No dependency change is being made at this time because:
 
-1. The project locks `exceljs@4.4.0`; the upstream GitHub release page currently identifies v4.4.0 as latest. This is a point-in-time upstream observation, not a claim that future releases will not appear.
-2. The earlier report that npm audit's automatic remediation requires a breaking ExcelJS change to `3.4.0` is historical. A fresh audit could not be completed on 2026-10-17 because this environment could not reach `https://registry.npmjs.org/-/npm/v1/security/advisories/bulk`; current npm remediation advice is therefore unverified.
+1. The project locks `exceljs@4.4.0`, whose package dependency range is `uuid@^8.3.0`; the [upstream releases page](https://github.com/exceljs/exceljs/releases) currently identifies v4.4.0 as latest. This is a point-in-time upstream observation, not a claim that future releases will not appear.
+2. The earlier report that npm audit's automatic remediation requires a breaking ExcelJS change to `3.4.0` is historical. A fresh audit could not be completed on 2026-10-21 because this environment could not reach `https://registry.npmjs.org/-/npm/v1/security/advisories/bulk`; current npm remediation advice is therefore unverified.
 3. An unverified npm override to update `uuid` outside ExcelJS's declared dependency range is not safe to apply without compatibility and regression testing.
 4. No unofficial ExcelJS fork is being adopted.
 
