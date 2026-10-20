@@ -136,6 +136,8 @@ jobs:
           npm run test:signup-rate-limit &&
           npm run test:security-headers &&
           npm run test:api-config &&
+          npm run check:deployment-doctor &&
+          npm run test:deployment-doctor &&
           npm run test:error-disclosure &&
           npm run test:foundation &&
           npm run test:dashboard

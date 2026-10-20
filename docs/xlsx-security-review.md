@@ -1,6 +1,12 @@
-# XLSX security review
+# Historical XLSX Security Review (Superseded)
 
-## Current dependency and advisory
+This review described an earlier dependency state and is retained for historical context only. It must not be used as current dependency or production-security evidence. The current root lockfile does not list `xlsx` as a dependency, the installed tree contains no `xlsx` package, and no current root application import from `xlsx` was found. Spreadsheet processing now uses ExcelJS. See [ExcelJS/uuid Security Risk Acceptance](security/exceljs-uuid-risk-acceptance.md) for the current package-level advisory assessment and its limits.
+
+The fresh `npm audit --omit=dev` required for a complete current dependency audit could not reach the npm registry in this review, so this superseding note does not claim that the full dependency tree is free of advisories.
+
+## Historical findings below
+
+## Historical dependency and advisory claim (superseded)
 
 The direct dependency is `xlsx` `^0.18.5`. `npm audit --omit=dev` reports one high-severity dependency finding with no automated compatible fix: SheetJS prototype pollution (GHSA-4r6h-8v6p-xvw6, affected before 0.19.3) and ReDoS (GHSA-5pgg-2g8v-p4x9, affected before 0.20.2).
 

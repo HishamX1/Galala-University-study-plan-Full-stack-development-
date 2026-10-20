@@ -48,11 +48,13 @@ check(/window\.__GU_API_BASE__/.test(frontendConfig), 'Frontend API configuratio
 check(/guLocalApiHosts/.test(frontendConfig) && /http:\/\/localhost:4000\/api/.test(frontendConfig) && /http:\/\/127\.0\.0\.1:4000\/api/.test(frontendConfig), 'Frontend local API detection configured');
 check(/https:\/\/galala-university-study-plan-full-stack-kd69\.onrender\.com\/api/.test(frontendConfig), 'Frontend production API configured');
 const render = read(path.join(repositoryRoot, 'render.yaml'));
-check(/NODE_ENV[\s\S]*production/.test(render) && /JWT_SECRET/.test(render), 'Render production environment declares NODE_ENV and JWT_SECRET');
-const netlify = read(path.join(repositoryRoot, 'netlify.toml'));
-check(/publish\s*=\s*"frontend"/.test(netlify), 'Netlify publish directory');
-check(/X-Content-Type-Options/.test(netlify) && /X-Frame-Options/.test(netlify), 'Netlify security headers');
+check(/NODE_ENV[\s\S]*production/.test(render) && /JWT_SECRET/.test(render), 'Render manifest declares production environment keys (static check only)');
+console.log('ℹ Vercel project settings are managed externally and cannot be verified by this doctor.');
+console.log('ℹ netlify.toml is retained legacy configuration and is not evidence of active frontend hosting.');
 
 await closePool();
-console.log(`\n${failed ? 'Doctor found issues. Resolve every ✗ before production deployment.' : 'Doctor passed. Deployment prerequisites look ready.'}`);
+console.log(`\n${failed
+  ? 'Doctor found issues in the checks available here. Resolve every ✗ before considering a release.'
+  : 'Local doctor checks passed. This does not verify hosted Vercel/Render settings or establish production readiness.'}`);
+console.log('ℹ Provider dashboard settings and production readiness are not verified by this doctor.');
 process.exitCode = failed ? 1 : 0;

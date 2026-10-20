@@ -1,9 +1,13 @@
 # ExcelJS/uuid Security Risk Acceptance
 
 - Original review date: 2026-10-05
-- Evidence refreshed: 2026-10-17 (repository dependency tree and upstream advisory/release pages)
+- Evidence refreshed: 2026-10-21 (repository dependency tree, complete production audit result, upstream package constraints, and read-only remediation review)
 - Status: Accepted temporarily / deferred remediation
 - Scope: Server-side admin XLSX workflows only
+
+### Evidence update (2026-10-21)
+
+The committed lockfile resolves `exceljs@4.4.0` with `uuid@8.3.2`. A fresh `npm audit --omit=dev --json` completed with 2 moderate package entries (direct `exceljs`, transitive `uuid`), both caused by [GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq); these are two nodes for one advisory. The audit's suggested automatic repair is `exceljs@3.4.0`, a semver-major downgrade. No dependency change was made. ExcelJS's current published manifest still declares `uuid@^8.3.0`, and its inspected code only calls `v4()` without a supplied buffer. That narrows the inspected call path but does not clear the package finding or prove the dependency safe.
 
 ## Advisory
 
@@ -30,9 +34,9 @@ These controls do not remove the dependency advisory, but they materially constr
 
 No dependency change is being made at this time because:
 
-1. The project locks `exceljs@4.4.0`; the upstream GitHub release page currently identifies v4.4.0 as latest. This is a point-in-time upstream observation, not a claim that future releases will not appear.
-2. The earlier report that npm audit's automatic remediation requires a breaking ExcelJS change to `3.4.0` is historical. A fresh audit could not be completed on 2026-10-17 because this environment could not reach `https://registry.npmjs.org/-/npm/v1/security/advisories/bulk`; current npm remediation advice is therefore unverified.
-3. An unverified npm override to update `uuid` outside ExcelJS's declared dependency range is not safe to apply without compatibility and regression testing.
+1. The project locks `exceljs@4.4.0`, whose package dependency range is `uuid@^8.3.0`; the [upstream releases page](https://github.com/exceljs/exceljs/releases) currently identifies v4.4.0 as latest. This is a point-in-time upstream observation, not a claim that future releases will not appear.
+2. The fresh registry-backed audit confirms npm's suggested automatic remediation is a downgrade to `exceljs@3.4.0`, marked semver-major; it is not approved because it risks the application's spreadsheet behavior.
+3. The smallest override candidate is a root-level npm override scoped only to the `uuid` child of `exceljs@4.4.0`, pinned to patched `uuid@11.1.1`. This violates ExcelJS's declared `^8.3.0` dependency range. UUID 11.1.1 still has a Node CommonJS export, and ExcelJS's inspected call uses only `require('uuid').v4()` with no arguments, but these facts alone do not prove compatibility. The override is not applied or approved; test it separately before any dependency change.
 4. No unofficial ExcelJS fork is being adopted.
 
 ## Acceptance conditions
@@ -44,7 +48,7 @@ The accepted residual risk is the presence of a vulnerable-version transitive pa
 - an official ExcelJS release updates the vulnerable transitive dependency; or
 - a separately approved and fully tested dependency override becomes available.
 
-Any future remediation must include API-compatibility review, admin-import testing, export and backup testing, project checks, deployment-doctor validation, a clean production audit result or documented residual findings, and package-lock consistency verification.
+Any future remediation must include clean isolated `npm ci`; lockfile/tree/audit verification; an ExcelJS-resolved UUID v4 and conditional-formatting round trip; XLSX import/export and backup round trips; all current parser-security cases; disposable-PostgreSQL staged publication and rollback/audit/state-retention tests; full project CI and deployment-doctor checks; a fresh full audit with residual findings documented; and package-lock consistency verification. These candidate-override tests have not been run, so no fix is claimed safe.
 
 This acceptance does **not** waive:
 

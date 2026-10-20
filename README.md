@@ -1,8 +1,10 @@
 # Galala University Study Plan Platform
 
-This repository now has one live architecture:
+The owner-confirmed intended deployment architecture is:
 
-`Netlify frontend -> Backend API -> Supabase Postgres`
+`Vercel frontend -> Render backend API -> Supabase Postgres`
+
+Provider dashboard settings have not been independently verified. Root `netlify.toml` is retained legacy configuration and does not describe the active Vercel deployment.
 
 The canonical application lives at the repository root. The previously referenced `modernization/` duplicate is absent from this checkout; root `backend/` and `frontend/` are the application trees present here.
 
@@ -12,7 +14,7 @@ The canonical application lives at the repository root. The previously reference
 - Admin UI: `frontend/admin/index.html`
 - Landing page: `frontend/index.html`
 - Backend API: `backend/src/server.js`
-- Netlify config: `netlify.toml`
+- Legacy Netlify config (not active hosting configuration): `netlify.toml`
 - Render backend config: `render.yaml`
 - Supabase schema: the complete ordered migration chain in `supabase/migrations/`
 - Supabase seed: `supabase/seed.sql`
@@ -58,9 +60,9 @@ Then open:
 ## Deployment
 
 1. Deploy the backend on Render from the repository root.
-2. Set `DATABASE_URL`, `PG_SSL=true`, `API_BASE_PATH=/api`, and `CORS_ORIGIN=<your Netlify origin>`.
+2. Set `DATABASE_URL`, `PG_SSL=true`, `API_BASE_PATH=/api`, and `CORS_ORIGIN=<the exact Vercel production origin>`.
 3. Set the frontend backend URL in `frontend/config.js`, for example `window.__GU_API_BASE__ = 'https://your-render-backend.onrender.com/api';`.
-4. Deploy the repository to Netlify. Netlify publishes `frontend`; `/`, `/student`, and `/admin` load the canonical landing/student/admin pages.
+4. Deploy the static `frontend/` directory through the Vercel project. Verify that `/`, `/student`, and `/admin` load correctly and that effective security headers are configured on Vercel; `netlify.toml` does not configure Vercel.
 
 ## Verification
 

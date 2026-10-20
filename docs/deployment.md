@@ -1,5 +1,7 @@
 # Deployment checklist
 
+This guide describes the owner-confirmed Vercel frontend and Render backend. The actual provider dashboard settings have not been independently verified.
+
 ## Backend On Render
 
 Use `render.yaml` or create a Render Web Service manually. The manifest uses `npm ci` and starts only after configuration and database connectivity validation succeed.
@@ -13,7 +15,7 @@ Required env vars:
 - `DATABASE_URL=<Supabase pooled Postgres URL>`
 - `PG_SSL=true`
 - `API_BASE_PATH=/api`
-- `CORS_ORIGIN=<Netlify site origin>`
+- `CORS_ORIGIN=<exact Vercel production site origin>`
 - `JWT_SECRET=<long random secret>`
 - `COOKIE_SECURE=true`
 - `COOKIE_SAME_SITE=None` when the frontend and API have different origins
@@ -21,9 +23,13 @@ Required env vars:
 
 Set `NODE_ENV=production`. Do not set `CORS_ORIGIN=*`; startup rejects it. Keep the API deployment's public root route available for the host health check; `/api/health` is Super Admin-only.
 
-## Frontend On Netlify
+## Frontend On Vercel
 
-The root `netlify.toml` publishes `frontend`.
+Vercel is the frontend host confirmed by the project owner. The Vercel dashboard settings are external to this repository and have not been verified here. The root `netlify.toml` is retained legacy configuration; it does not configure Vercel and must not be used as evidence of active frontend hosting.
+
+The repository's static frontend lives in `frontend/`, and `frontend/config.js` points to the Render API. In the Vercel project dashboard, verify the connected repository and production branch, framework/build settings, and that the deployed output contains this directory's static files. Check `/`, `/student`, and `/admin` after deployment. Do not assume values from the legacy Netlify file.
+
+No Vercel-specific configuration file is present in this repository. Confirm the effective frontend security headers and any redirects/rewrites in Vercel's project/deployment settings; the Node backend's response headers and `netlify.toml` do not establish headers on Vercel-served static responses.
 
 Set the deployed backend API URL in `frontend/config.js`:
 
@@ -33,13 +39,7 @@ window.__GU_API_BASE__ = 'https://your-render-backend.onrender.com/api';
 
 The browser will also accept `?apiBase=https://your-render-backend.onrender.com/api` or the admin login API base field for temporary testing.
 
-The exact Netlify URL must be the backend `CORS_ORIGIN`. Because Netlify and Render are separate origins, `COOKIE_SAME_SITE=None` and HTTPS (`COOKIE_SECURE=true`) are required for login cookies to accompany API requests.
-
-Netlify routes:
-
-- `/` -> `index.html`
-- `/student` -> `student/index.html`
-- `/admin` -> `admin/index.html`
+The exact Vercel production origin must be present in Render's `CORS_ORIGIN` (or `CORS_ORIGINS`) allowlist. The backend accepts comma-separated explicit origins and rejects wildcard CORS in production. Because Vercel and Render are separate origins, production auth cookies require HTTPS, `COOKIE_SAME_SITE=None`, and `COOKIE_SECURE=true`; the application sets them `HttpOnly`.
 
 ## Checks
 
@@ -52,6 +52,8 @@ npm run test:migration-preflight
 npm run db:preflight
 npm run doctor
 ```
+
+`npm run doctor` checks repository-visible configuration and, when configured, performs read-only database readiness/migration-history checks. It cannot inspect Vercel or Render dashboard values and is not a production-readiness certification.
 
 The migration preflight is read-only and must report every repository migration as applied with no unexpected versions before a release is considered schema-ready. Review and apply pending migrations through the approved Supabase migration workflow; do not run production migrations just to make the preflight green. Then deploy the backend, verify the health route, and deploy the static frontend using [the release and recovery runbook](release-and-recovery-runbook.md). Bootstrap is a one-time controlled operation only for a new installation; do not repeat it on an existing deployment.
 

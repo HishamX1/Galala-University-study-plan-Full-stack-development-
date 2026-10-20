@@ -6,7 +6,7 @@ This repository root is the directory containing `.git`, `package.json`, `backen
 
 The current source tree has two parallel application trees: the root `backend/` + `frontend/` implementation and a duplicated `modernization/` tree. Treat the root implementation as the source to inspect for normal code work. Do not assume that `modernization/` is canonical or copy changes between the trees without explicit architectural confirmation.
 
-The canonical deployment configuration is root `render.yaml` plus root `netlify.toml`: Render uses the repository root and Netlify publishes `frontend/`. The root `package.json` owns the root scripts. Keep the older `modernization/` tree out of runtime configuration.
+The active frontend host is Vercel (owner-confirmed); its project settings are managed in Vercel and have not been independently audited in this checkout. Render uses the repository root for the backend, and root `package.json` owns the scripts. Root `netlify.toml` is retained legacy configuration pending a separately planned cleanup; do not treat it as active hosting configuration or remove it without an explicit scoped change. Keep the older `modernization/` tree out of runtime configuration.
 
 ## Current architecture
 
