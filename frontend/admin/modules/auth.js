@@ -90,8 +90,9 @@ export function setupLogin() {
       document.querySelector('[data-user-name]')?.replaceChildren(document.createTextNode(`${user.name} (${user.role.replace('_', ' ')})`));
       document.querySelectorAll('[data-super-admin]').forEach((item) => { item.hidden = user.role !== 'super_admin'; });
       setMessage('success', `Welcome, ${user.name}`);
-      await loadRelations();
-      await loadAdminOps();
+      // Catalog rendering and operations rendering use separate endpoints and
+      // cache fields; start both after role validation, then open deep links.
+      await Promise.all([loadRelations(), loadAdminOps()]);
       if (user.role === 'super_admin') await loadControlCenter();
       await openRequestedAdminDestination(user.role);
     } catch (error) {
@@ -171,7 +172,7 @@ export function setupLogin() {
     elements.dashboard.hidden = false;
     document.querySelector('[data-user-name]')?.replaceChildren(document.createTextNode(`${user.name} (${user.role.replace('_', ' ')})`));
     document.querySelectorAll('[data-super-admin]').forEach((item) => { item.hidden = user.role !== 'super_admin'; });
-    await loadRelations(); await loadAdminOps(); if (user.role === 'super_admin') { await renderUsers(); await loadControlCenter(); }
+    await Promise.all([loadRelations(), loadAdminOps()]); if (user.role === 'super_admin') { await renderUsers(); await loadControlCenter(); }
     await openRequestedAdminDestination(user.role);
   }).catch(() => { window.location.assign('../admin-login.html'); });
 
