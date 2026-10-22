@@ -88,22 +88,24 @@ function percentile(sorted, p) {
 try {
   await seedFixture();
   await refreshFixtureStatistics();
-  const queryPlans = await withPostgresClient(async (client) => [
-    await explain(client, 'active faculties', 'SELECT id, name, created_at, updated_at FROM faculties WHERE deleted_at IS NULL ORDER BY name'),
-    await explain(client, 'active programs', 'SELECT id, faculty_id, name, duration_years, created_at, updated_at FROM programs WHERE deleted_at IS NULL ORDER BY name'),
-    await explain(client, 'active program courses with course and program joins',
+  const queryPlans = await withPostgresClient(async (client) => {
+    const plans = [];
+    plans.push(await explain(client, 'active faculties', 'SELECT id, name, created_at, updated_at FROM faculties WHERE deleted_at IS NULL ORDER BY name'));
+    plans.push(await explain(client, 'active programs', 'SELECT id, faculty_id, name, duration_years, created_at, updated_at FROM programs WHERE deleted_at IS NULL ORDER BY name'));
+    plans.push(await explain(client, 'active program courses with course and program joins',
       `SELECT pc.id, pc.program_id, p.faculty_id, pc.course_id, pc.code, c.name, pc.year_no, pc.semester_no,
               pc.credits, pc.is_required, c.description, pc.created_at, pc.updated_at
          FROM program_courses pc
          JOIN programs p ON p.id = pc.program_id AND p.deleted_at IS NULL
          JOIN courses c ON c.id = pc.course_id AND c.deleted_at IS NULL
         WHERE pc.deleted_at IS NULL
-        ORDER BY pc.program_id, pc.year_no, pc.semester_no, pc.code`),
-    await explain(client, 'active prerequisite relationships',
+        ORDER BY pc.program_id, pc.year_no, pc.semester_no, pc.code`));
+    plans.push(await explain(client, 'active prerequisite relationships',
       `SELECT id, course_id, prerequisite_course_id, visible_to_students, created_at, updated_at
          FROM course_prerequisites WHERE deleted_at IS NULL
-        ORDER BY course_id, prerequisite_course_id`)
-  ]);
+        ORDER BY course_id, prerequisite_course_id`));
+    return plans;
+  });
 
   for (let index = 0; index < warmupSamples; index += 1) await getDashboardSummary();
   const durations = [];
