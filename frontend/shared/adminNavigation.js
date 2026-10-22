@@ -49,7 +49,7 @@ export function adminQuickAccessActions(role, adminIndexHref = './admin/index.ht
   return null;
 }
 
-export function activateAdminTab(tab, role, documentRef = document, windowRef = window, { updateUrl = true } = {}) {
+export function activateAdminTab(tab, role, documentRef = document, windowRef = window, { updateUrl = true, focus = false } = {}) {
   if (!canAccessAdminTab(tab, role)) return false;
   const buttons = [...documentRef.querySelectorAll('[data-admin-tab]')];
   const button = buttons.find((candidate) => candidate.dataset.adminTab === tab && !candidate.hidden && !candidate.disabled);
@@ -59,10 +59,11 @@ export function activateAdminTab(tab, role, documentRef = document, windowRef = 
   for (const candidate of buttons) {
     const selected = candidate === button;
     candidate.classList.toggle('is-active', selected);
-    if (selected) candidate.setAttribute('aria-current', 'page');
-    else candidate.removeAttribute('aria-current');
+    candidate.setAttribute('aria-selected', String(selected));
+    candidate.setAttribute('tabindex', selected ? '0' : '-1');
   }
   for (const candidate of documentRef.querySelectorAll('[data-admin-panel]')) candidate.hidden = candidate !== panel;
+  if (focus) button.focus();
 
   if (updateUrl && windowRef?.history?.replaceState && windowRef?.location?.href) {
     const url = new URL(windowRef.location.href);

@@ -1,6 +1,6 @@
 import { byId } from '../../shared/dom.js';
 import { request } from './apiClient.js';
-import { elements, setMessage } from './adminDom.js';
+import { elements, setMessage, withButtonBusy } from './adminDom.js';
 import { loadRelations } from './dataLoader.js';
 import { loadAdminOps } from './adminOps.js';
 import { openConfirmDialog, openContentDialog, openFormDialog } from './dialogs.js';
@@ -49,15 +49,15 @@ function summarizeCourseImpact(impact) {
     `You are deleting ${impact?.course?.code || 'this course'}.`,
     `This removes ${prereqCount} prerequisite link(s) from this course and ${requiredForCount} required-for link(s) from other courses.`,
     requiredFor ? `Affected hierarchy links: ${requiredFor}${requiredForCount > 6 ? ', ...' : ''}.` : '',
-    'Deleting this course may affect the hierarchy tree. Confirm only if this cleanup is intended.'
+    'The course is moved to the recycle bin and disappears from the active student catalog until restored. Confirm only if that is intended.'
   ].filter(Boolean).join(' ');
 }
 
 function summarizeProgramImpact(impact) {
   return [
     `You are deleting ${impact?.program?.name || 'this program'}.`,
-    `This removes ${impact?.courseCount || 0} program course row(s), ${impact?.prerequisiteLinkCount || 0} prerequisite link(s), and ${impact?.requiredForLinkCount || 0} required-for link(s) tied to those rows.`,
-    'Shared course records remain when they are still used by another program. Confirm only if this cascade cleanup is intended.'
+    `This moves ${impact?.courseCount || 0} program course row(s), ${impact?.prerequisiteLinkCount || 0} prerequisite link(s), and ${impact?.requiredForLinkCount || 0} required-for link(s) tied to those rows to the recycle bin.`,
+    'Shared course records remain when they are still used by another program. These records can be restored from the recycle bin.'
   ].join(' ');
 }
 
@@ -77,6 +77,15 @@ async function confirmDeletion(kind, id) {
       title: `Delete ${impact.program.name}`,
       description: summarizeProgramImpact(impact),
       submitLabel: 'Delete program'
+    });
+  }
+
+  if (kind === 'faculty') {
+    const faculty = cache.faculties.find((item) => Number(item.id) === Number(id));
+    return openConfirmDialog({
+      title: `Delete faculty ${faculty?.name || ''}?`,
+      description: 'The faculty and its programs, curriculum rows, and related prerequisite links will move to the recycle bin and disappear from the active student catalog. They can be reviewed and restored there.',
+      submitLabel: 'Move faculty to recycle bin'
     });
   }
 
@@ -219,6 +228,9 @@ async function openRelationManager(course) {
         const removeBtn = event.target.closest('[data-dialog-remove]');
         if (!addBtn && !toggleBtn && !removeBtn) return;
 
+        const actionButton = addBtn || toggleBtn || removeBtn;
+        await withButtonBusy(actionButton, async () => {
+        setMessage('progress', addBtn ? 'Adding the relationship…' : toggleBtn ? 'Updating relationship visibility…' : 'Removing the relationship…');
         try {
           if (addBtn) {
             const baseCourseId = Number(root.querySelector('.relation-manager').dataset.courseId);
@@ -261,6 +273,7 @@ async function openRelationManager(course) {
             ? 'This item changed while you were editing. The catalog has been refreshed; compare the latest values and reapply your change if appropriate.'
             : error.message);
         }
+        });
       });
     }
   });
@@ -317,9 +330,12 @@ export function bindCrudDelegates() {
         const courseId = Number(toggleBtn.dataset.courseId);
         const prerequisiteId = Number(toggleBtn.dataset.prerequisiteId);
         const visibleToStudents = toggleBtn.dataset.visible === 'true';
-        await request(`/program-courses/${courseId}/prerequisites/${prerequisiteId}/visibility`, {
-          method: 'PUT',
-          body: JSON.stringify({ visibleToStudents, expectedVersion: findCourse(courseId)?.version })
+        await withButtonBusy(toggleBtn, async () => {
+          setMessage('progress', 'Updating relationship visibility…');
+          await request(`/program-courses/${courseId}/prerequisites/${prerequisiteId}/visibility`, {
+            method: 'PUT',
+            body: JSON.stringify({ visibleToStudents, expectedVersion: findCourse(courseId)?.version })
+          });
         });
         setMessage('success', `Relation ${visibleToStudents ? 'shown to' : 'hidden from'} students.`);
       }
@@ -329,8 +345,11 @@ export function bindCrudDelegates() {
         const kind = editBtn.dataset.kind;
         const patch = await patchFor(kind, id);
         if (!patch) return;
-        await request(`/${endpointFor(kind)}/${id}`, { method: 'PUT', body: JSON.stringify(patch) });
-        setMessage('success', `${kind} updated.`);
+        await withButtonBusy(editBtn, async () => {
+          setMessage('progress', `Updating the ${kind}…`);
+          await request(`/${endpointFor(kind)}/${id}`, { method: 'PUT', body: JSON.stringify(patch) });
+        });
+        setMessage('success', `${kind[0].toUpperCase()}${kind.slice(1)} updated successfully.`);
       }
 
       if (deleteBtn) {
@@ -343,10 +362,13 @@ export function bindCrudDelegates() {
           : kind === 'program'
             ? cache.programs.find((item) => Number(item.id) === id)
             : cache.programCourses.find((item) => Number(item.id) === id);
-        await request(`/${endpointFor(kind)}/${id}`, {
-          method: 'DELETE', body: JSON.stringify({ expectedVersion: current?.version })
+        await withButtonBusy(deleteBtn, async () => {
+          setMessage('progress', `Deleting the ${kind}…`);
+          await request(`/${endpointFor(kind)}/${id}`, {
+            method: 'DELETE', body: JSON.stringify({ expectedVersion: current?.version })
+          });
         });
-        setMessage('success', `${kind} deleted.`);
+        setMessage('success', `${kind[0].toUpperCase()}${kind.slice(1)} deleted successfully.`);
       }
 
       await loadRelations();
@@ -371,33 +393,36 @@ export function bindAdminActions() {
     renderLists();
   }));
 
-  byId('addFaculty').onclick = async () => {
+  byId('addFaculty').onclick = async (event) => withButtonBusy(event.currentTarget, async () => {
+    setMessage('progress', 'Adding the faculty…');
     try {
       const name = byId('facultyName').value.trim();
       if (!name) throw new Error('Faculty name is required');
       await request('/faculties', { method: 'POST', body: JSON.stringify({ name }) });
-      setMessage('success', 'Faculty added');
+      setMessage('success', 'Faculty added successfully. You can now select it when creating a program.');
       clearEntityInputs();
       await loadRelations();
       await loadAdminOps();
     } catch (error) { setMessage('error', error.message); }
-  };
+  });
 
-  byId('addProgram').onclick = async () => {
+  byId('addProgram').onclick = async (event) => withButtonBusy(event.currentTarget, async () => {
+    setMessage('progress', 'Adding the program…');
     try {
       const facultyId = Number(elements.ids.programFaculty.value);
       const name = byId('programName').value.trim();
       const durationYears = Number(byId('programDurationYears').value);
       if (!facultyId || !name || !durationYears) throw new Error('Program fields are required');
       await request('/programs', { method: 'POST', body: JSON.stringify({ facultyId, name, durationYears }) });
-      setMessage('success', 'Program added');
+      setMessage('success', 'Program added successfully. You can now add courses to it.');
       clearEntityInputs();
       await loadRelations();
       await loadAdminOps();
     } catch (error) { setMessage('error', error.message); }
-  };
+  });
 
-  byId('addCourse').onclick = async () => {
+  byId('addCourse').onclick = async (event) => withButtonBusy(event.currentTarget, async () => {
+    setMessage('progress', 'Adding the course…');
     try {
       const programId = Number(elements.ids.courseProgram.value);
       const yearNo = Number(byId('courseYearNo').value);
@@ -414,10 +439,10 @@ export function bindAdminActions() {
         method: 'POST',
         body: JSON.stringify({ programId, yearNo, semesterNo, code, name, credits, description, prerequisiteCourseIds })
       });
-      setMessage('success', 'Course added');
+      setMessage('success', `Course ${code} added successfully to the selected program.`);
       clearEntityInputs();
       await loadRelations();
       await loadAdminOps();
     } catch (error) { setMessage('error', error.message); }
-  };
+  });
 }

@@ -3,6 +3,7 @@ import { byId } from '../../shared/dom.js';
 export const elements = {
   error: byId('error'),
   success: byId('success'),
+  progress: byId('progress'),
   authError: byId('authError'),
   apiBaseInput: byId('apiBaseUrl'),
   loginCard: byId('adminLoginCard'),
@@ -67,4 +68,26 @@ export const elements = {
 export function setMessage(type, message) {
   elements.error.textContent = type === 'error' ? message : '';
   elements.success.textContent = type === 'success' ? message : '';
+  if (elements.progress) {
+    elements.progress.textContent = type === 'progress' ? message : '';
+    elements.progress.hidden = type !== 'progress';
+  }
+}
+
+export async function withButtonBusy(button, operation) {
+  if (!button || button.disabled) return;
+  const wasDisabled = button.disabled;
+  button.disabled = true;
+  button.setAttribute('aria-busy', 'true');
+  try {
+    return await operation();
+  } finally {
+    button.disabled = wasDisabled;
+    button.removeAttribute('aria-busy');
+    if (button.isConnected && !button.closest('[hidden]')) button.focus();
+    if (elements.progress) {
+      elements.progress.textContent = '';
+      elements.progress.hidden = true;
+    }
+  }
 }

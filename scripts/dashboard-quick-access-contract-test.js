@@ -30,10 +30,13 @@ function makeButton(tab, active = false, hidden = false) {
   const attributes = {};
   return {
     dataset: { adminTab: tab }, hidden, disabled: false,
+    focused: false,
     classList: { toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); }, contains(name) { return classes.has(name); } },
     setAttribute(name, value) { attributes[name] = value; },
     removeAttribute(name) { delete attributes[name]; },
-    hasAttribute(name) { return Object.hasOwn(attributes, name); }
+    hasAttribute(name) { return Object.hasOwn(attributes, name); },
+    getAttribute(name) { return attributes[name] ?? null; },
+    focus() { this.focused = true; }
   };
 }
 function makePanel(tab, hidden = true) { return { dataset: { adminPanel: tab }, hidden }; }
@@ -54,7 +57,9 @@ const browser = makeWindow('https://example.test/admin/index.html?tab=requests&c
 assert.equal(activateAdminTab('requests', 'super_admin', dom, browser), true);
 assert.equal(dom.panels.find((panel) => panel.dataset.adminPanel === 'requests').hidden, false);
 assert.equal(dom.buttons.find((button) => button.dataset.adminTab === 'requests').classList.contains('is-active'), true);
-assert.equal(dom.buttons.find((button) => button.dataset.adminTab === 'requests').hasAttribute('aria-current'), true);
+assert.equal(dom.buttons.find((button) => button.dataset.adminTab === 'requests').getAttribute('aria-selected'), 'true');
+assert.equal(dom.buttons.find((button) => button.dataset.adminTab === 'requests').getAttribute('tabindex'), '0');
+assert.equal(dom.buttons.find((button) => button.dataset.adminTab === 'dashboard').getAttribute('aria-selected'), 'false');
 
 assert.equal(activateAdminTab('users', 'regular_admin', dom, browser), false, 'role-hidden tabs cannot be activated by direct navigation');
 assert.equal(dom.panels.find((panel) => panel.dataset.adminPanel === 'requests').hidden, false);
@@ -68,6 +73,8 @@ const refreshedDom = makeDom();
 const refreshedUrl = new URL(browser.location.href);
 assert.equal(activateAdminTab(resolveAdminTab(refreshedUrl.searchParams.get('tab'), 'super_admin').tab, 'super_admin', refreshedDom, browser, { updateUrl: false }), true);
 assert.equal(refreshedDom.panels.find((panel) => panel.dataset.adminPanel === 'audit').hidden, false, 'the selected tab can be restored from the URL after reload');
+assert.equal(activateAdminTab('catalog', 'super_admin', refreshedDom, browser, { updateUrl: false, focus: true }), true);
+assert.equal(refreshedDom.buttons.find((button) => button.dataset.adminTab === 'catalog').focused, true, 'keyboard navigation can move focus to the selected tab');
 
 const dashboard = fs.readFileSync(new URL('../frontend/dashboard.js', import.meta.url), 'utf8');
 const adminOps = fs.readFileSync(new URL('../frontend/admin/modules/adminOps.js', import.meta.url), 'utf8');
@@ -79,10 +86,10 @@ assert.match(adminOps, /activateAdminTab\(quick\.dataset\.quick, cache\.adminRol
 assert.doesNotMatch(adminOps, /querySelector\(`\[data-admin-tab=/);
 assert.match(adminAuth, /activateAdminTab\(tab, role, document, window, \{ updateUrl: false \}\)/);
 assert.match(adminAuth, /await openRequestedAdminDestination\(user\.role\)/);
-const internalQuickActions = [...adminHtml.matchAll(/<button type="button" data-quick="([^"]+)">([^<]+)<\/button>/g)].map((match) => [match[2], match[1]]);
+const internalQuickActions = [...adminHtml.matchAll(/<button type="button" data-quick="([^"]+)">([\s\S]*?)<\/button>/g)].map((match) => [match[2].replace(/<svg[\s\S]*?<\/svg>/, '').replace(/<[^>]+>/g, '').trim(), match[1]]);
 assert.deepEqual(internalQuickActions, [
-  ['Add Faculty', 'catalog'], ['Add Program', 'catalog'], ['Add Course', 'catalog'], ['Manage Relations', 'catalog'],
-  ['Import', 'transfer'], ['Export', 'transfer'], ['Backup', 'backup'], ['Audit Logs', 'audit']
+  ['Add faculty', 'catalog'], ['Add program', 'catalog'], ['Add course', 'catalog'], ['Manage relations', 'catalog'],
+  ['Import catalog', 'transfer'], ['Export catalog', 'transfer'], ['Create backup', 'backup'], ['Review audit logs', 'audit']
 ]);
 
 console.log('Dashboard Quick Access route, refresh, active-state, and role-gate contracts passed.');

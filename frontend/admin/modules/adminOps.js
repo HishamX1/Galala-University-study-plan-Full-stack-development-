@@ -1,6 +1,6 @@
 import { escapeHtml } from '../../shared/dom.js';
 import { download, request } from './apiClient.js';
-import { elements, setMessage } from './adminDom.js';
+import { elements, setMessage, withButtonBusy } from './adminDom.js';
 import { loadRelations } from './dataLoader.js';
 import { openConfirmDialog } from './dialogs.js';
 import { cache } from './state.js';
@@ -73,9 +73,9 @@ function renderImportStages() {
   if (!elements.lists.importStages) return;
   elements.lists.importStages.innerHTML = cache.importStages.map((stage) => `<div class="import-stage-row">
     <span><strong>${escapeHtml(stage.type)}</strong> · ${escapeHtml(stage.count)} row(s) · expires ${escapeHtml(fmtDate(stage.expiresAt))}</span>
-    <button type="button" data-import-review="${escapeHtml(stage.id)}">Review</button>
-    <button type="button" data-import-publish="${escapeHtml(stage.id)}" data-preview-version="${escapeHtml(stage.previewVersion)}" ${stage.valid ? '' : 'disabled'}>Publish</button>
-    <button type="button" data-import-cancel="${escapeHtml(stage.id)}">Cancel</button>
+    <button type="button" data-import-review="${escapeHtml(stage.id)}" aria-label="Review staged ${escapeHtml(stage.type)} import">Review preview</button>
+    <button type="button" data-import-publish="${escapeHtml(stage.id)}" data-preview-version="${escapeHtml(stage.previewVersion)}" aria-label="Publish reviewed ${escapeHtml(stage.type)} import" ${stage.valid ? '' : 'disabled'}>Publish</button>
+    <button type="button" class="secondary" data-import-cancel="${escapeHtml(stage.id)}" aria-label="Cancel staged ${escapeHtml(stage.type)} import">Cancel stage</button>
   </div>`).join('') || '<p class="empty-state">No active staged imports.</p>';
 }
 
@@ -169,8 +169,8 @@ export function renderAdminOps() {
       <td>${escapeHtml(item.deleted_by || '-')}</td>
       <td>${escapeHtml(item.dependencies)}</td>
       <td>
-        <button type="button" data-restore="${item.id}" data-kind="${item.kind}">Restore</button>
-        <button type="button" class="danger" data-purge="${item.id}" data-kind="${item.kind}">Permanent Delete</button>
+        <button type="button" data-restore="${escapeHtml(item.id)}" data-kind="${escapeHtml(item.kind)}" aria-label="Restore ${escapeHtml(item.kind)}: ${escapeHtml(item.label)}">Restore</button>
+        <button type="button" class="danger" data-purge="${escapeHtml(item.id)}" data-kind="${escapeHtml(item.kind)}" aria-label="Permanently delete ${escapeHtml(item.kind)}: ${escapeHtml(item.label)}">Permanently delete</button>
       </td>
     </tr>`).join('') || '<tr><td colspan="6">Recycle bin is empty.</td></tr>';
   }
@@ -180,7 +180,7 @@ export function renderAdminOps() {
       <td>${escapeHtml(fmtDate(backup.created_at))}</td>
       <td>${escapeHtml(backup.format)}</td>
       <td>${escapeHtml(JSON.stringify(backup.record_counts))}</td>
-      <td><button type="button" data-download-backup="${backup.id}">Download</button></td>
+      <td><button type="button" data-download-backup="${escapeHtml(backup.id)}" aria-label="Download ${escapeHtml(backup.format)} backup created ${escapeHtml(fmtDate(backup.created_at))}">Download backup</button></td>
     </tr>`).join('') || '<tr><td colspan="4">No backups generated yet.</td></tr>';
   }
 
@@ -201,6 +201,22 @@ export function renderAdminOps() {
 }
 
 export function bindAdminOpsActions() {
+  document.querySelector('[role="tablist"]')?.addEventListener('keydown', (event) => {
+    const current = event.target.closest('[role="tab"][data-admin-tab]');
+    if (!current) return;
+    const tabs = [...document.querySelectorAll('[role="tab"][data-admin-tab]:not([hidden]):not([disabled])')];
+    const index = tabs.indexOf(current);
+    if (index < 0) return;
+    let nextIndex = null;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (index + 1) % tabs.length;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = (index - 1 + tabs.length) % tabs.length;
+    if (event.key === 'Home') nextIndex = 0;
+    if (event.key === 'End') nextIndex = tabs.length - 1;
+    if (nextIndex === null) return;
+    event.preventDefault();
+    activateAdminTab(tabs[nextIndex].dataset.adminTab, cache.adminRole, document, window, { focus: true });
+  });
+
   document.querySelectorAll('[data-admin-tab]').forEach((button) => {
     button.addEventListener('click', () => {
       activateAdminTab(button.dataset.adminTab, cache.adminRole);
@@ -231,11 +247,16 @@ export function bindAdminOpsActions() {
     const publishImport = event.target.closest('[data-import-publish]');
     const cancelImport = event.target.closest('[data-import-cancel]');
     if (!quick && !restore && !purge && !exportBtn && !backupBtn && !downloadBackup && !validateImportBtn && !stageImportBtn && !reviewImport && !publishImport && !cancelImport) return;
+    if (quick) {
+      if (!activateAdminTab(quick.dataset.quick, cache.adminRole)) setMessage('error', 'That administrator section is not available to your account.');
+      return;
+    }
 
+    const actionButton = restore || purge || exportBtn || backupBtn || downloadBackup || validateImportBtn || stageImportBtn || reviewImport || publishImport || cancelImport;
+    await withButtonBusy(actionButton, async () => {
+    const progress = restore ? 'Restoring the catalog item…' : purge ? 'Permanently deleting the catalog item…' : exportBtn ? 'Preparing the catalog export…' : backupBtn ? 'Generating the catalog backup…' : downloadBackup ? 'Preparing the backup download…' : validateImportBtn ? 'Validating the import…' : stageImportBtn ? 'Saving the staged import…' : reviewImport ? 'Loading the saved preview…' : publishImport ? 'Publishing the reviewed catalog changes…' : 'Cancelling the staged import…';
+    setMessage('progress', progress);
     try {
-      if (quick) {
-        if (!activateAdminTab(quick.dataset.quick, cache.adminRole)) setMessage('error', 'That administrator section is not available to your account.');
-      }
       if (restore) {
         await request(`/admin/recycle-bin/${restore.dataset.kind}/${restore.dataset.restore}/restore`, { method: 'POST' });
         setMessage('success', 'Item restored.');
@@ -243,7 +264,9 @@ export function bindAdminOpsActions() {
         await loadAdminOps();
       }
       if (purge) {
-        const confirmed = await openConfirmDialog({ title: 'Permanent Delete', description: 'This removes the item permanently after it has been reviewed in the recycle bin.', submitLabel: 'Permanent Delete' });
+        const item = cache.recycleBin.find((entry) => String(entry.id) === purge.dataset.purge);
+        const label = item?.label || `${purge.dataset.kind} record`;
+        const confirmed = await openConfirmDialog({ title: `Permanently delete ${label}?`, description: `This permanently removes ${label} from the recycle bin. It cannot be restored afterward. Review its listed dependencies before continuing.`, submitLabel: 'Permanently delete' });
         if (!confirmed) return;
         await request(`/admin/recycle-bin/${purge.dataset.kind}/${purge.dataset.purge}`, { method: 'DELETE' });
         setMessage('success', 'Item permanently deleted.');
@@ -252,6 +275,7 @@ export function bindAdminOpsActions() {
       if (exportBtn) {
         const payload = await download(`/admin/export?format=${encodeURIComponent(elements.ids.exportFormat.value)}`);
         downloadPayload(payload);
+        setMessage('success', 'The catalog export is ready; your browser should begin downloading it.');
         await loadAdminOps();
       }
       if (backupBtn) {
@@ -261,6 +285,7 @@ export function bindAdminOpsActions() {
       }
       if (downloadBackup) {
         downloadPayload(await download(`/admin/backups/${downloadBackup.dataset.downloadBackup}/download`));
+        setMessage('success', 'The backup download is ready; your browser should begin downloading it.');
       }
       if (validateImportBtn || stageImportBtn) {
         const payload = await importPayload();
@@ -281,7 +306,9 @@ export function bindAdminOpsActions() {
         renderImportPreview(stage);
       }
       if (cancelImport) {
-        const confirmed = await openConfirmDialog({ title: 'Cancel Staged Import', description: 'This prevents publication. The staged data is retained only until its 24-hour expiry and then cleaned up.', submitLabel: 'Cancel Import' });
+        const stage = cache.importStages.find((item) => item.id === cancelImport.dataset.importCancel);
+        const summary = stage ? `${stage.count} ${stage.type} row(s) will no longer be publishable.` : 'The selected staged import will no longer be publishable.';
+        const confirmed = await openConfirmDialog({ title: 'Cancel this staged import?', description: `${summary} The stage will remain listed only until its 24-hour expiry.`, submitLabel: 'Cancel staged import', danger: false });
         if (!confirmed) return;
         await request(`/admin/import/stages/${encodeURIComponent(cancelImport.dataset.importCancel)}`, { method: 'DELETE' });
         cache.importStages = await request('/admin/import/stages');
@@ -291,7 +318,7 @@ export function bindAdminOpsActions() {
       if (publishImport) {
         const stage = cache.importStages.find((item) => item.id === publishImport.dataset.importPublish);
         if (!stage?.valid) throw new Error('Review a valid staged import before publishing.');
-        const confirmed = await openConfirmDialog({ title: 'Publish Catalog Import', description: `Publish ${stage.count} ${stage.type} row(s)? This will write catalog changes and an audit record in one transaction.`, submitLabel: 'Publish Import' });
+        const confirmed = await openConfirmDialog({ title: 'Publish the reviewed catalog import?', description: `Publish ${stage.count} ${stage.type} row(s) from the preview you reviewed? Catalog changes and their audit record are written together. If the preview is stale, publication will stop and you will be asked to review the updated changes.`, submitLabel: 'Publish reviewed import', danger: false });
         if (!confirmed) return;
         const result = await request(`/admin/import/stages/${encodeURIComponent(stage.id)}/publish`, {
           method: 'POST', body: JSON.stringify({ previewVersion: Number(publishImport.dataset.previewVersion) })
@@ -311,5 +338,6 @@ export function bindAdminOpsActions() {
       }
       setMessage('error', error.message);
     }
+    });
   });
 }
