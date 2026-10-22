@@ -378,7 +378,7 @@ export async function createComplaint(user, message, requestId = null) {
     } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
   });
 }
-export async function listComplaints() { return listComplaintRecords({ query }); }
+export async function listComplaints(options = undefined) { return listComplaintRecords({ query }, options); }
 export async function getComplaintDetails(id) {
   const complaint = await findComplaintRecord(id, { query });
   if (!complaint) return null;
@@ -441,6 +441,6 @@ export async function createCommunication(recipientId, message, senderId, actor 
     } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
   });
 }
-export async function listCommunications() {
-  return listCommunicationRecords({ query });
+export async function listCommunications(options = undefined) {
+  return listCommunicationRecords({ query }, options);
 }

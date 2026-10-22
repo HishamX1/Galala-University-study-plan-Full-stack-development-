@@ -5,7 +5,7 @@ import { requireIsolatedTestDatabase } from './helpers/require-isolated-test-dat
 requireIsolatedTestDatabase();
 
 const { closePool, query } = await import('../backend/src/db/client.js');
-const { assignComplaint, createComplaint, createUser, getComplaintDetails, listComplaints, updateComplaint } = await import('../backend/src/services/authService.js');
+const { assignComplaint, createComplaint, createUser, getComplaintDetails, listComplaints, listCommunications, updateComplaint } = await import('../backend/src/services/authService.js');
 
 const suffix = crypto.randomUUID().replaceAll('-', '');
 const functionName = `complaint_fail_audit_${suffix}`;
@@ -43,6 +43,14 @@ try {
   assert.equal(listed.current_submitter_name, student.name);
   assert.equal(listed.email, student.email);
   assert.equal(listed.assigned_to, null);
+  const complaintPage = await listComplaints({ limit: 1, offset: 0 });
+  assert.equal(complaintPage.items.length, 1);
+  assert.ok(complaintPage.total >= 1);
+  assert.equal(complaintPage.limit, 1);
+  assert.equal(complaintPage.items.some((item) => item.id === complaintId), true);
+  const communicationPage = await listCommunications({ limit: 5, offset: 0 });
+  assert.ok(communicationPage.items.length <= 5);
+  assert.equal(typeof communicationPage.total, 'number');
 
   legacyEmail = `legacy-complaint-${suffix}@example.test`;
   legacyComplaintId = (await query('INSERT INTO public.student_complaints (student_id,email,message) VALUES ($1,$2,$3) RETURNING id', [`LEGACY-${suffix.slice(0, 12)}`, legacyEmail, 'Historical fixture without identity metadata'])).rows[0].id;

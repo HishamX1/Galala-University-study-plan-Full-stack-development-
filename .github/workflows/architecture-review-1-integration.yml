@@ -147,6 +147,8 @@ jobs:
           npm run test:foundation &&
           npm run test:doctor-contract &&
           npm run test:dashboard &&
+          npm run check:support-pagination &&
+          npm run test:support-pagination &&
           npm run check:dashboard-db-performance &&
           npm run check:dashboard-quick-access &&
           npm run test:dashboard-quick-access &&

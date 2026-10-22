@@ -115,6 +115,50 @@ assert.equal(await handleAdminOperationsRequest(
 ), true);
 assert.equal(regularAdminAudit.statusCode, 200);
 
+const supportPage = response();
+assert.equal(await handleAdminSupportRequest(
+  request('GET', `${env.apiBasePath}/admin/complaints?limit=25&offset=50`), supportPage,
+  new URL(`${env.apiBasePath}/admin/complaints?limit=25&offset=50`, 'http://localhost'), admin,
+  { listComplaints: async (page) => {
+    assert.deepEqual(page, { limit: '25', offset: '50' });
+    return { items: [{ id: 'complaint-51' }], total: 61, limit: 25, offset: 50 };
+  } }
+), true);
+assert.equal(supportPage.statusCode, 200);
+assert.deepEqual(JSON.parse(supportPage.body), { complaints: [{ id: 'complaint-51' }], page: { limit: 25, offset: 50, total: 61 } });
+
+const invalidSupportPage = response();
+await handleAdminSupportRequest(
+  request('GET', `${env.apiBasePath}/admin/complaints?limit=101`), invalidSupportPage,
+  new URL(`${env.apiBasePath}/admin/complaints?limit=101`, 'http://localhost'), admin,
+  { listComplaints: async () => { throw new Error('Invalid request must not reach the list query'); } }
+);
+assert.equal(invalidSupportPage.statusCode, 400);
+assert.deepEqual(JSON.parse(invalidSupportPage.body), { error: 'Invalid complaint page.' });
+
+const communicationsPage = response();
+assert.equal(await handleAdminSupportRequest(
+  request('GET', `${env.apiBasePath}/admin/communications?limit=50&offset=100`), communicationsPage,
+  new URL(`${env.apiBasePath}/admin/communications?limit=50&offset=100`, 'http://localhost'), admin,
+  { listCommunications: async (page) => {
+    assert.deepEqual(page, { limit: '50', offset: '100' });
+    return { items: [{ id: 'communication-101' }], total: 111, limit: 50, offset: 100 };
+  } }
+), true);
+assert.deepEqual(JSON.parse(communicationsPage.body), { communications: [{ id: 'communication-101' }], page: { limit: 50, offset: 100, total: 111 } });
+
+const legacyCommunications = response();
+await handleAdminSupportRequest(request('GET', `${env.apiBasePath}/admin/communications`), legacyCommunications,
+  new URL(`${env.apiBasePath}/admin/communications`, 'http://localhost'), admin,
+  { listCommunications: async (page) => { assert.equal(page, undefined); return [{ id: 'legacy-communication' }]; } });
+assert.deepEqual(JSON.parse(legacyCommunications.body), { communications: [{ id: 'legacy-communication' }] });
+
+const legacyComplaints = response();
+await handleAdminSupportRequest(request('GET', `${env.apiBasePath}/admin/complaints`), legacyComplaints,
+  new URL(`${env.apiBasePath}/admin/complaints`, 'http://localhost'), admin,
+  { listComplaints: async (page) => { assert.equal(page, undefined); return [{ id: 'legacy-complaint' }]; } });
+assert.deepEqual(JSON.parse(legacyComplaints.body), { complaints: [{ id: 'legacy-complaint' }] });
+
 const options = response();
 await handleApi(request('OPTIONS', `${env.apiBasePath}/admin/users`), options,
   new URL(`${env.apiBasePath}/admin/users`, 'http://localhost'), { resolveCurrentUser });

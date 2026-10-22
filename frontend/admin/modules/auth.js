@@ -9,21 +9,57 @@ import { cache } from './state.js';
 
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[char]);
 
+const SUPPORT_PAGE_SIZE = 50;
+function renderSupportPage(kind, records, page) {
+  const list = document.getElementById(kind === 'complaints' ? 'complaintList' : 'communicationList');
+  if (!list) return;
+  if (kind === 'complaints') {
+    list.innerHTML = records.map((item) => {
+      const submitter = item.submitted_name || item.current_submitter_name || 'Historical identity unavailable';
+      const modifier = item.last_modified_by_name || (new Date(item.updated_at).getTime() > new Date(item.created_at).getTime() ? 'Historical administrator unavailable' : 'Not modified');
+      const assigneeOptions = [`<option value="">Unassigned</option>`, ...cache.complaintAdmins.map((admin) => `<option value="${escapeHtml(admin.id)}" ${admin.id === item.assigned_to ? 'selected' : ''}>${escapeHtml(admin.name)} (${escapeHtml(admin.role.replace('_', ' '))})</option>`)].join('');
+      return `<tr data-complaint-row="${escapeHtml(item.id)}"><td>${escapeHtml(submitter)}<small>${escapeHtml(item.student_id || 'Student ID not recorded')} · ${escapeHtml(item.email)}</small><small>Submitted ${escapeHtml(item.created_at)}</small></td><td>${escapeHtml(item.message)}</td><td>${escapeHtml(item.status)}</td><td><div>${item.assigned_to_name ? `${escapeHtml(item.assigned_to_name)} (assigned by ${escapeHtml(item.assigned_by_name || 'Historical administrator unavailable')})` : 'Unassigned'}</div><small>${item.assigned_at ? `Assignment updated ${escapeHtml(item.assigned_at)}` : 'No assignment history'}</small><select aria-label="Select an administrator for complaint from ${escapeHtml(submitter)}" data-complaint-assignee="${escapeHtml(item.id)}">${assigneeOptions}</select><button type="button" data-complaint-assign="${escapeHtml(item.id)}">Update assignment</button></td><td>${escapeHtml(modifier)}<small>${escapeHtml(item.updated_at)}</small></td><td><button type="button" data-complaint-view="${escapeHtml(item.id)}">View history</button><button type="button" data-complaint-update="${escapeHtml(item.id)}">Update status / reply</button></td></tr>`;
+    }).join('') || '<tr><td colspan="6">No complaints.</td></tr>';
+  } else {
+    list.innerHTML = records.map((item) => `<tr><td>${escapeHtml(item.recipient_name)}<small>${escapeHtml(item.recipient_email)}</small></td><td>${escapeHtml(item.subject)}</td><td>${escapeHtml(item.status)}</td><td>${escapeHtml(item.created_at)}</td></tr>`).join('') || '<tr><td colspan="4">No communications.</td></tr>';
+  }
+  const nav = document.getElementById(`${kind}Pagination`);
+  if (nav) {
+    const start = page.total ? page.offset + 1 : 0;
+    const end = Math.min(page.offset + page.limit, page.total);
+    nav.innerHTML = `<button type="button" data-support-page="${kind}" data-direction="previous" ${page.offset === 0 ? 'disabled' : ''}>Previous</button><span>Showing ${start}–${end} of ${page.total}</span><button type="button" data-support-page="${kind}" data-direction="next" ${end >= page.total ? 'disabled' : ''}>Next</button>`;
+  }
+}
+
+async function loadSupportPage(kind, pageIndex = cache.supportPages[kind]) {
+  const page = Math.max(0, Number(pageIndex) || 0);
+  const requestVersion = ++cache.supportPageRequests[kind];
+  const endpoint = kind === 'complaints' ? '/admin/complaints' : '/admin/communications';
+  const data = await request(`${endpoint}?limit=${SUPPORT_PAGE_SIZE}&offset=${page * SUPPORT_PAGE_SIZE}`);
+  if (requestVersion !== cache.supportPageRequests[kind]) return;
+  cache.supportPages[kind] = page;
+  cache.supportPageData[kind] = data.page;
+  renderSupportPage(kind, data[kind], data.page);
+}
+
 async function loadControlCenter(adminUsersPromise = null) {
   const userDataPromise = adminUsersPromise || (cache.complaintAdmins.length ? Promise.resolve(null) : request('/admin/users'));
-  const [resetData, complaintData, communicationData, userData] = await Promise.all([request('/admin/password-reset-requests'), request('/admin/complaints'), request('/admin/communications'), userDataPromise]);
+  const complaintRequestVersion = ++cache.supportPageRequests.complaints;
+  const communicationRequestVersion = ++cache.supportPageRequests.communications;
+  const [resetData, complaintData, communicationData, userData] = await Promise.all([request('/admin/password-reset-requests'), request(`/admin/complaints?limit=${SUPPORT_PAGE_SIZE}&offset=${cache.supportPages.complaints * SUPPORT_PAGE_SIZE}`), request(`/admin/communications?limit=${SUPPORT_PAGE_SIZE}&offset=${cache.supportPages.communications * SUPPORT_PAGE_SIZE}`), userDataPromise]);
   if (userData) cache.complaintAdmins = userData.users.filter((item) => ['regular_admin', 'super_admin'].includes(item.role) && item.status === 'active');
   const resets = document.getElementById('resetRequestList');
   const complaints = document.getElementById('complaintList');
   const communications = document.getElementById('communicationList');
   if (resets) resets.innerHTML = resetData.requests.map((item) => `<tr data-reset-request-row="${escapeHtml(item.id)}"><td>${escapeHtml(item.name)}<small>${escapeHtml(item.email)} · ${escapeHtml(item.student_id || 'Student ID not recorded')}</small></td><td>${escapeHtml(item.role)}</td><td>${escapeHtml(item.status)}</td><td>${escapeHtml(item.created_at)}</td><td>${item.decided_at ? `${escapeHtml(item.decided_by_name || 'Historical administrator unavailable')}<small>${escapeHtml(item.decided_at)}</small>` : 'Awaiting review'}</td><td>${item.status === 'open' ? `<button data-reset-decision="approve" data-request-id="${escapeHtml(item.id)}">Approve</button> <button data-reset-decision="reject" data-request-id="${escapeHtml(item.id)}">Reject</button>` : '-'}</td></tr>`).join('') || '<tr><td colspan="6">No requests.</td></tr>';
-  if (complaints) complaints.innerHTML = complaintData.complaints.map((item) => {
-    const submitter = item.submitted_name || item.current_submitter_name || 'Historical identity unavailable';
-    const modifier = item.last_modified_by_name || (new Date(item.updated_at).getTime() > new Date(item.created_at).getTime() ? 'Historical administrator unavailable' : 'Not modified');
-    const assigneeOptions = [`<option value="">Unassigned</option>`, ...cache.complaintAdmins.map((admin) => `<option value="${escapeHtml(admin.id)}" ${admin.id === item.assigned_to ? 'selected' : ''}>${escapeHtml(admin.name)} (${escapeHtml(admin.role.replace('_', ' '))})</option>`)].join('');
-    return `<tr data-complaint-row="${escapeHtml(item.id)}"><td>${escapeHtml(submitter)}<small>${escapeHtml(item.student_id || 'Student ID not recorded')} · ${escapeHtml(item.email)}</small><small>Submitted ${escapeHtml(item.created_at)}</small></td><td>${escapeHtml(item.message)}</td><td>${escapeHtml(item.status)}</td><td><div>${item.assigned_to_name ? `${escapeHtml(item.assigned_to_name)} (assigned by ${escapeHtml(item.assigned_by_name || 'Historical administrator unavailable')})` : 'Unassigned'}</div><small>${item.assigned_at ? `Assignment updated ${escapeHtml(item.assigned_at)}` : 'No assignment history'}</small><select aria-label="Select an administrator for complaint from ${escapeHtml(submitter)}" data-complaint-assignee="${escapeHtml(item.id)}">${assigneeOptions}</select><button type="button" data-complaint-assign="${escapeHtml(item.id)}">Update assignment</button></td><td>${escapeHtml(modifier)}<small>${escapeHtml(item.updated_at)}</small></td><td><button type="button" data-complaint-view="${escapeHtml(item.id)}">View history</button><button type="button" data-complaint-update="${escapeHtml(item.id)}">Update status / reply</button></td></tr>`;
-  }).join('') || '<tr><td colspan="6">No complaints.</td></tr>';
-  if (communications) communications.innerHTML = communicationData.communications.map((item) => `<tr><td>${escapeHtml(item.recipient_name)}<small>${escapeHtml(item.recipient_email)}</small></td><td>${escapeHtml(item.subject)}</td><td>${escapeHtml(item.status)}</td><td>${escapeHtml(item.created_at)}</td></tr>`).join('') || '<tr><td colspan="4">No queued communications.</td></tr>';
+  if (complaints && complaintRequestVersion === cache.supportPageRequests.complaints) {
+    cache.supportPageData.complaints = complaintData.page;
+    renderSupportPage('complaints', complaintData.complaints, complaintData.page);
+  }
+  if (communications && communicationRequestVersion === cache.supportPageRequests.communications) {
+    cache.supportPageData.communications = communicationData.page;
+    renderSupportPage('communications', communicationData.communications, communicationData.page);
+  }
 }
 
 async function showComplaintDetails(id) {
@@ -248,4 +284,17 @@ export function setupLogin() {
     } catch (error) { setMessage('error', error.message); }
   });
   document.getElementById('complaintDetailClose')?.addEventListener('click', () => document.getElementById('complaintDetailDialog')?.close());
+  if (!document.getElementById('admin-panel-requests')?._supportPageListener) {
+    const requestsPanel = document.getElementById('admin-panel-requests');
+    if (requestsPanel) requestsPanel._supportPageListener = true;
+    requestsPanel?.addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-support-page]');
+      if (!button) return;
+      const { supportPage: kind, direction } = button.dataset;
+      const next = cache.supportPages[kind] + (direction === 'next' ? 1 : -1);
+      if (next < 0) return;
+      button.disabled = true;
+      try { await loadSupportPage(kind, next); } catch (error) { setMessage('error', error.message); button.disabled = false; }
+    });
+  }
 }

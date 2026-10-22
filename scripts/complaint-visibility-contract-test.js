@@ -110,6 +110,8 @@ assert.match(adminOps, /supportRequestHref/);
 assert.match(adminOps, /tab:\s*'requests'/);
 assert.match(adminHtml, /data-admin-panel="requests"[^>]*data-super-admin/);
 assert.match(adminHtml, /complaintDetailDialog/);
+assert.match(adminUi, /SUPPORT_PAGE_SIZE = 50/);
+assert.match(adminHtml, /id="complaintsPagination"/);
 
 let resetRequestSql = '';
 await listResetRequests({ query: async (sql) => { resetRequestSql = sql; return { rows: [] }; } });
