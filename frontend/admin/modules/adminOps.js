@@ -74,9 +74,9 @@ function renderImportStages() {
 export async function loadAdminOps() {
   const [dashboard, recycleBin, backups, health, importStages] = await Promise.all([
     request('/admin/dashboard'),
-    request('/admin/recycle-bin'),
+    cache.adminRole === 'super_admin' ? request('/admin/recycle-bin') : Promise.resolve([]),
     request('/admin/backups'),
-    request('/admin/system-health'),
+    cache.adminRole === 'super_admin' ? request('/admin/system-health') : Promise.resolve(null),
     request('/admin/import/stages')
   ]);
   cache.dashboard = dashboard;
@@ -93,9 +93,18 @@ export async function loadAuditLogs() {
     range: elements.ids.auditRange?.value || '',
     entity: elements.ids.auditEntity?.value || '',
     order: elements.ids.auditOrder?.value || 'newest',
-    search: elements.ids.auditSearch?.value || ''
+    search: elements.ids.auditSearch?.value || '',
+    category: elements.ids.auditCategory?.value || '',
+    actor: elements.ids.auditActor?.value || '',
+    from: elements.ids.auditFrom?.value || '',
+    to: elements.ids.auditTo?.value || '',
+    limit: '50',
+    offset: String(cache.auditOffset)
   });
   cache.auditLogs = await request(`/admin/audit-logs?${params.toString()}`);
+  if (elements.ids.auditPrevious) elements.ids.auditPrevious.disabled = cache.auditOffset === 0;
+  if (elements.ids.auditNext) elements.ids.auditNext.disabled = cache.auditLogs.length < 50;
+  if (elements.ids.auditPage) elements.ids.auditPage.textContent = `Page ${Math.floor(cache.auditOffset / 50) + 1}`;
 }
 
 export function renderAdminOps() {
@@ -122,7 +131,7 @@ export function renderAdminOps() {
       metric('Unused Courses', dashboard.analytics.unusedCourses)
     ].join('');
     elements.lists.activityList.innerHTML = dashboard.latestActivity?.length
-      ? dashboard.latestActivity.map((log) => `<li><strong>${escapeHtml(log.action)}</strong> ${escapeHtml(log.entity)} <span>${escapeHtml(fmtDate(log.created_at))}</span></li>`).join('')
+      ? dashboard.latestActivity.map((log) => `<li><strong>${escapeHtml(log.action)}</strong> ${escapeHtml(log.entity)} <span>by ${escapeHtml(log.actor_name || 'Legacy event')} · ${escapeHtml(fmtDate(log.created_at))}</span></li>`).join('')
       : '<li class="empty-state">No audit activity yet.</li>';
   }
 
@@ -131,9 +140,13 @@ export function renderAdminOps() {
       <td>${escapeHtml(fmtDate(log.created_at))}</td>
       <td>${escapeHtml(log.action)}</td>
       <td>${escapeHtml(log.entity)}</td>
-      <td>${escapeHtml(log.entityId ?? '-')}</td>
+      <td>${escapeHtml(log.entityId ?? log.target_id ?? '-')}</td>
+      <td>${escapeHtml(log.actor_name || 'Legacy event')}${log.actor_role ? ` (${escapeHtml(log.actor_role)})` : ''}</td>
+      <td>${escapeHtml(log.category || 'admin')}</td>
+      <td>${escapeHtml(log.outcome || 'success')}</td>
+      <td>${escapeHtml(log.request_id || '-')}</td>
       <td>${escapeHtml(log.description || '')}</td>
-    </tr>`).join('') || '<tr><td colspan="5">No audit logs found.</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="9">No audit logs found.</td></tr>';
   }
 
   if (elements.lists.recycleBin) {
@@ -185,12 +198,16 @@ export function bindAdminOpsActions() {
     });
   });
 
-  [elements.ids.auditSearch, elements.ids.auditRange, elements.ids.auditEntity, elements.ids.auditOrder].forEach((field) => {
+  [elements.ids.auditSearch, elements.ids.auditRange, elements.ids.auditEntity, elements.ids.auditOrder, elements.ids.auditCategory, elements.ids.auditActor, elements.ids.auditFrom, elements.ids.auditTo].forEach((field) => {
     field?.addEventListener('input', async () => {
+      cache.auditOffset = 0;
       await loadAuditLogs();
       renderAdminOps();
     });
   });
+
+  elements.ids.auditPrevious?.addEventListener('click', async () => { cache.auditOffset = Math.max(0, cache.auditOffset - 50); await loadAuditLogs(); renderAdminOps(); });
+  elements.ids.auditNext?.addEventListener('click', async () => { if (cache.auditLogs.length < 50) return; cache.auditOffset += 50; await loadAuditLogs(); renderAdminOps(); });
 
   document.body.addEventListener('click', async (event) => {
     const quick = event.target.closest('[data-quick]');

@@ -165,7 +165,7 @@ export async function handleApi(req, res, url, { resolveCurrentUser = currentUse
     if (await handleAdminOperationsRequest(req, res, url, user)) return true;
 
     if (await handleCatalogReadRequest(req, res, url)) return true;
-    if (await handleCatalogRequest(req, res, url)) return true;
+    if (await handleCatalogRequest(req, res, url, user)) return true;
 
     return json(res, 404, { error: 'API route not found' });
   } catch (error) {

@@ -18,9 +18,9 @@ assert.deepEqual(compareMigrationVersions(['20260420120000'], ['20260420120000',
   unexpected: ['20260901000000']
 });
 const repositoryMigrations = loadRequiredMigrations();
-assert.equal(repositoryMigrations.length, 10, 'the complete canonical migration chain should be discovered');
-assert.equal(repositoryMigrations.at(-1).version, '20261022120000');
-assert.equal(repositoryMigrations.at(-1).filename, '20261022120000_student_password_reset_email.sql');
+assert.equal(repositoryMigrations.length, 11, 'the complete canonical migration chain should be discovered');
+assert.equal(repositoryMigrations.at(-1).version, '20261022130000');
+assert.equal(repositoryMigrations.at(-1).filename, '20261022130000_super_admin_activity_audit.sql');
 
 const previousDatabaseUrl = process.env.DATABASE_URL;
 process.env.DATABASE_URL = '';

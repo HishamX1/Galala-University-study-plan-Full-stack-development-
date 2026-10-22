@@ -24,6 +24,7 @@ const {
   updateProgram,
   updateProgramCourse
 } = await import('../backend/src/services/catalogService.js');
+const { createUser } = await import('../backend/src/services/authService.js');
 
 const suffix = crypto.randomUUID().replaceAll('-', '').toUpperCase();
 const facultyName = `AR1 Faculty ${suffix}`;
@@ -34,7 +35,7 @@ const courseNames = [`AR1 Course A ${suffix}`, `AR1 Course B ${suffix}`, `AR1 Co
 const courseCodes = [`AR1A${suffix}`, `AR1B${suffix}`, `AR1C${suffix}`];
 const failedCourseName = `AR1 Course Failed Create ${suffix}`;
 const failedCourseCode = `AR1X${suffix}`;
-const fixture = { facultyId: null, programId: null, programCourseIds: [], courseIds: [], relationIds: [] };
+const fixture = { facultyId: null, programId: null, programCourseIds: [], courseIds: [], relationIds: [], actorId: null };
 const triggerNames = [];
 const functionNames = [];
 
@@ -65,11 +66,16 @@ async function installAuditFailure(action, entityId) {
 }
 
 try {
-  const faculty = await createFaculty({ name: facultyName });
+  const actor = await createUser({ name: `Audit Actor ${suffix}`, email: `audit-${suffix.toLowerCase()}@example.invalid`, password: 'AuditActorPass!2026', role: 'super_admin', status: 'active' });
+  fixture.actorId = actor.id;
+  const faculty = await createFaculty({ name: facultyName }, { ...actor, requestId: `catalog-${suffix.slice(0, 24)}` });
   assert.ok(faculty?.id);
   assert.ok(faculty.version?.updatedAt);
   fixture.facultyId = faculty.id;
   assert.equal(faculty.name, facultyName);
+  const actorAudit = (await rows("SELECT actor_id,actor_role,actor_name,category,request_id,target_id FROM admin_audit_logs WHERE entity='faculty' AND entity_id=$1 AND action='Created Faculty'", [faculty.id]))[0];
+  assert.deepEqual(actorAudit, { actor_id: actor.id, actor_role: 'super_admin', actor_name: actor.name, category: 'catalog', request_id: `catalog-${suffix.slice(0, 24)}`, target_id: String(faculty.id) },
+    'catalog audit entries retain authenticated actor, category, target, and request context');
   assert.ok((await getFaculties()).some((item) => item.id === faculty.id));
 
   const staleFacultyVersion = faculty.version;
@@ -252,11 +258,13 @@ try {
          OR (entity = 'program' AND entity_id = ANY($2::bigint[]))
          OR (entity = 'course' AND entity_id = ANY($3::bigint[]))
          OR (entity = 'relation' AND entity_id = ANY($4::bigint[]))`, [facultyIds, programIds, programCourseIds, fixture.relationIds]).catch(() => {});
+    if (fixture.actorId) await query('DELETE FROM admin_audit_logs WHERE actor_id=$1', [fixture.actorId]).catch(() => {});
     await query('DELETE FROM course_prerequisites WHERE course_id = ANY($1::bigint[]) OR prerequisite_course_id = ANY($1::bigint[])', [programCourseIds]).catch(() => {});
     await query('DELETE FROM program_courses WHERE id = ANY($1::bigint[])', [programCourseIds]).catch(() => {});
     await query('DELETE FROM programs WHERE id = ANY($1::bigint[])', [programIds]).catch(() => {});
     await query('DELETE FROM faculties WHERE id = ANY($1::bigint[])', [facultyIds]).catch(() => {});
     await query('DELETE FROM courses WHERE id = ANY($1::bigint[])', [courseIds]).catch(() => {});
   }
+  if (fixture.actorId) await query('DELETE FROM public.app_users WHERE id=$1', [fixture.actorId]).catch(() => {});
   await closePool();
 }

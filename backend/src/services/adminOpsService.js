@@ -168,22 +168,24 @@ async function catalogRows(client) {
   return readCatalogSnapshot(client);
 }
 
-export async function logAdminAction(client, { action, entity, entityId = null, oldValues = null, newValues = null, description = '', adminUser = 'Admin' }) {
-  await insertAuditLog(client || { query }, { action, entity, entityId, oldValues, newValues, description, adminUser });
+export async function logAdminAction(client, { action, entity, entityId = null, targetId = null, oldValues = null, newValues = null, description = '', adminUser = 'Admin', actor = null, category = null, requestId = null, outcome = 'success' }) {
+  const inferredCategory = category || ({ faculty: 'catalog', program: 'catalog', course: 'catalog', relation: 'catalog', catalog: 'catalog', backup: 'backup', catalog_import_stage: 'import' }[entity] || 'admin');
+  await insertAuditLog(client || { query }, { action, entity, entityId, targetId, oldValues, newValues, description, adminUser: actor?.name || actor?.email || adminUser, actorId: actor?.id || null, actorRole: actor?.role || null, actorName: actor?.name || actor?.email || null, outcome, category: inferredCategory, requestId: requestId || actor?.requestId || null });
 }
 
 export async function getAuditLogs(filters = {}) {
-  const limit = Math.min(Number(filters.limit) || 100, 500);
+  const limit = Math.min(Number(filters.limit) || 50, 100);
   const { rows } = await listAuditLogs({ query }, { ...filters, limit });
   return rows.map((row) => ({ ...row, id: toInt(row.id), entityId: row.entity_id == null ? null : toInt(row.entity_id) }));
 }
 
-export async function getDashboardSummary() {
+export async function getDashboardSummary(actor = null) {
   return withPostgresClient(async (client) => {
     const catalog = await catalogRows(client);
     const relations = catalog.relationships;
-    const today = await countTodayAuditEvents(client);
-    const logs = await listRecentAuditEvents(client);
+    const scopedActorId = actor?.role === 'regular_admin' ? actor.id : null;
+    const today = await countTodayAuditEvents(client, scopedActorId);
+    const logs = await listRecentAuditEvents(client, { actorId: scopedActorId });
     const deleted = await countDeletedCatalogEntities(client);
     const programCounts = catalog.programs.map((program) => ({
       id: toInt(program.id),
@@ -249,7 +251,7 @@ export async function getRecycleBin() {
   return rows.map((row) => ({ ...row, id: toInt(row.id), dependencies: Number(row.dependencies || 0) }));
 }
 
-export async function restoreRecycleItem(kind, id) {
+export async function restoreRecycleItem(kind, id, actor = null) {
   if (!ENTITY_TABLES[kind]) throw new Error('INVALID_ENTITY');
   return withPostgresClient(async (client) => {
     await client.query('BEGIN');
@@ -280,7 +282,7 @@ export async function restoreRecycleItem(kind, id) {
         entityId: id,
         oldValues: current.rows[0],
         newValues: { restored: true },
-        description: `Restored ${kind} from recycle bin`
+        description: `Restored ${kind} from recycle bin`, actor
       });
       await client.query('COMMIT');
       return true;
@@ -291,7 +293,7 @@ export async function restoreRecycleItem(kind, id) {
   });
 }
 
-export async function permanentlyDeleteRecycleItem(kind, id) {
+export async function permanentlyDeleteRecycleItem(kind, id, actor = null) {
   if (!ENTITY_TABLES[kind]) throw new Error('INVALID_ENTITY');
   return withPostgresClient(async (client) => {
     await client.query('BEGIN');
@@ -316,7 +318,7 @@ export async function permanentlyDeleteRecycleItem(kind, id) {
         entity: kind,
         entityId: id,
         oldValues: current.rows[0],
-        description: `Permanently deleted ${kind}`
+        description: `Permanently deleted ${kind}`, actor
       });
       await client.query('COMMIT');
       return true;
@@ -327,33 +329,33 @@ export async function permanentlyDeleteRecycleItem(kind, id) {
   });
 }
 
-export async function exportCatalog(format = 'json') {
+export async function exportCatalog(format = 'json', actor = null) {
   if (!['json', 'csv', 'xlsx'].includes(format)) throw new Error('Unsupported export format');
   return withPostgresClient(async (client) => {
     const catalog = await catalogRows(client);
     const exportData = normalizedExport(catalog);
-    await logAdminAction(client, {
-      action: 'Exported Catalog',
-      entity: 'catalog',
-      description: `Exported catalog as ${format}`
-    });
+    let payload;
     if (format === 'csv') {
-      return {
+      payload = {
         filename: `catalog-export-${timestamp()}.csv`,
         mimeType: 'text/csv; charset=utf-8',
         content: toCsv(exportData.courses)
       };
+    } else if (format === 'xlsx') {
+      payload = {
+        filename: `catalog-export-${timestamp()}.xlsx`,
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        content: await toWorkbookBuffer(exportData)
+      };
+    } else {
+      payload = { filename: `catalog-export-${timestamp()}.json`, mimeType: 'application/json; charset=utf-8', content: JSON.stringify(exportData, null, 2) };
     }
-    if (format === 'xlsx') return {
-      filename: `catalog-export-${timestamp()}.xlsx`,
-      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      content: await toWorkbookBuffer(exportData)
-    };
-    return { filename: `catalog-export-${timestamp()}.json`, mimeType: 'application/json; charset=utf-8', content: JSON.stringify(exportData, null, 2) };
+    await logAdminAction(client, { action: 'Exported Catalog', entity: 'catalog', description: `Exported catalog as ${format}`, actor, category: 'catalog' });
+    return payload;
   });
 }
 
-export async function createBackup(format = 'json') {
+export async function createBackup(format = 'json', actor = null) {
   if (!['json', 'csv', 'xlsx'].includes(format)) throw new Error('Unsupported backup format');
   return withPostgresClient(async (client) => {
     await client.query('BEGIN');
@@ -371,7 +373,7 @@ export async function createBackup(format = 'json') {
         entity: 'backup',
         entityId: rows[0].id,
         newValues: rows[0],
-        description: `Generated ${format} catalog backup`
+        description: `Generated ${format} catalog backup`, actor
       });
       await client.query('COMMIT');
       return { ...rows[0], id: toInt(rows[0].id) };
@@ -622,8 +624,10 @@ export async function createImportStage(payload, user) {
       const stage = inserted.rows[0];
       await logAdminAction(client, {
         adminUser: user.name || user.email || 'Admin',
+        actor: user,
         action: 'Catalog Import Staged',
         entity: 'catalog_import_stage',
+        category: 'import',
         newValues: { stageId: stage.id, type: stage.import_type, count: preview.count, expiresAt: stage.expires_at },
         description: `Staged ${preview.count} ${stage.import_type} import row(s)`
       });
@@ -636,7 +640,8 @@ export async function createImportStage(payload, user) {
   });
 }
 
-export async function cancelImportStage(id, ownerId, adminName = 'Admin') {
+export async function cancelImportStage(id, ownerId, actor = null) {
+  const auditActor = typeof actor === 'string' ? { name: actor } : actor;
   return withPostgresClient(async (client) => {
     await client.query('BEGIN');
     try {
@@ -645,9 +650,10 @@ export async function cancelImportStage(id, ownerId, adminName = 'Admin') {
       const cancelled = await cancelCatalogImportStage(client, id, ownerId);
       if (!cancelled.rowCount) throw new ConflictError('Import stage is no longer available for cancellation.');
       await logAdminAction(client, {
-        adminUser: adminName,
+        actor: auditActor,
         action: 'Catalog Import Cancelled',
         entity: 'catalog_import_stage',
+        category: 'import',
         newValues: { stageId: id, type: stage.import_type },
         description: `Cancelled staged ${stage.import_type} import`
       });
@@ -713,8 +719,10 @@ export async function publishImportStage(id, ownerId, expectedPreviewVersion, us
       }
       await logAdminAction(client, {
         adminUser: user.name || user.email || 'Admin',
+        actor: user,
         action: `Imported ${stage.import_type}`,
         entity: stage.import_type,
+        category: 'import',
         newValues: { inserted, stageId: id },
         description: `Imported ${inserted} ${stage.import_type} from staged import`
       });

@@ -7,7 +7,7 @@ import { createComplaint, getDashboardData, updateOwnProfile } from '../services
 export async function handleDashboardRequest(req, res, url, user) {
   if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/dashboard`) {
     const dashboard = await getDashboardData(user);
-    if (user.role !== 'student') dashboard.catalog = await getDashboardSummary();
+    if (user.role !== 'student') dashboard.catalog = await getDashboardSummary(user);
     if (hasPermission(user, Permissions.systemRead)) dashboard.systemHealth = await getSystemHealth();
     return json(res, 200, dashboard);
   }
@@ -18,10 +18,10 @@ export async function handleDashboardRequest(req, res, url, user) {
   if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/student/complaints`) {
     const body = await parseBody(req);
     if (!String(body.message || '').trim()) return json(res, 400, { error: 'A complaint message is required.' });
-    return json(res, 201, { complaint: await createComplaint(user, String(body.message).trim()) });
+    return json(res, 201, { complaint: await createComplaint(user, String(body.message).trim(), req.requestId) });
   }
   if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/dashboard`) {
-    return json(res, 200, await getDashboardSummary());
+    return json(res, 200, await getDashboardSummary(user));
   }
   return false;
 }

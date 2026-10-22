@@ -15,13 +15,27 @@ const defaultOperations = {
   cancelImportStage, createImportStage, getImportStage, listImportStages, publishImportStage
 };
 const stageIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const dateOnly = (value) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().startsWith(value);
 
 export async function handleAdminOperationsRequest(req, res, url, user, operations = defaultOperations) {
+  const actor = user ? { ...user, ...(req.requestId ? { requestId: req.requestId } : {}) } : null;
   if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/audit-logs`) {
+    const from = url.searchParams.get('from') || '';
+    const to = url.searchParams.get('to') || '';
+    const actorId = url.searchParams.get('actorId') || '';
+    if ((from && !dateOnly(from)) || (to && !dateOnly(to)) || (from && to && from > to)
+      || (actorId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(actorId))) {
+      json(res, 400, { error: 'Invalid audit filter.' });
+      return true;
+    }
     json(res, 200, await operations.getAuditLogs({
       range: url.searchParams.get('range') || '', entity: url.searchParams.get('entity') || '',
       action: url.searchParams.get('action') || '', search: url.searchParams.get('search') || '',
-      order: url.searchParams.get('order') || 'newest'
+      order: url.searchParams.get('order') || 'newest', category: url.searchParams.get('category') || '',
+      actorId: user?.role === 'regular_admin' ? user.id : actorId,
+      actor: url.searchParams.get('actor') || '', from,
+      to, limit: toNumber(url.searchParams.get('limit')),
+      offset: toNumber(url.searchParams.get('offset'))
     }));
     return true;
   }
@@ -33,7 +47,7 @@ export async function handleAdminOperationsRequest(req, res, url, user, operatio
     const parts = url.pathname.split('/'); const kind = parts.at(-3); const id = toNumber(parts.at(-2));
     const idErr = validateEntityId(id, `${kind} id`);
     if (idErr) { json(res, 400, { error: idErr }); return true; }
-    const restored = await operations.restoreRecycleItem(kind, id);
+    const restored = await operations.restoreRecycleItem(kind, id, actor);
     if (!restored) { json(res, 404, { error: 'Recycle bin item not found' }); return true; }
     json(res, 200, { restored: true, kind, id });
     return true;
@@ -42,7 +56,7 @@ export async function handleAdminOperationsRequest(req, res, url, user, operatio
     const parts = url.pathname.split('/'); const kind = parts.at(-2); const id = toNumber(parts.at(-1));
     const idErr = validateEntityId(id, `${kind} id`);
     if (idErr) { json(res, 400, { error: idErr }); return true; }
-    const deleted = await operations.permanentlyDeleteRecycleItem(kind, id);
+    const deleted = await operations.permanentlyDeleteRecycleItem(kind, id, actor);
     if (!deleted) { json(res, 404, { error: 'Recycle bin item not found' }); return true; }
     json(res, 200, { deleted: true, kind, id });
     return true;
@@ -61,7 +75,7 @@ export async function handleAdminOperationsRequest(req, res, url, user, operatio
       json(res, 400, { error: 'Import payload must be an object.', code: 'VALIDATION_ERROR' });
       return true;
     }
-    json(res, 201, await operations.createImportStage(body, user));
+    json(res, 201, await operations.createImportStage(body, actor));
     return true;
   }
   if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/import/stages`) {
@@ -78,7 +92,7 @@ export async function handleAdminOperationsRequest(req, res, url, user, operatio
         json(res, 400, { error: 'A preview version is required.', code: 'INVALID_IMPORT_PREVIEW_VERSION' });
         return true;
       }
-      const result = await operations.publishImportStage(id, user.id, body.previewVersion, user);
+      const result = await operations.publishImportStage(id, user.id, body.previewVersion, actor);
       if (result.outcome === 'stale') {
         json(res, 409, { error: result.error, code: result.code, stage: result.stage, diff: result.diff });
       } else if (result.outcome === 'version_conflict') {
@@ -96,12 +110,12 @@ export async function handleAdminOperationsRequest(req, res, url, user, operatio
       return true;
     }
     if (req.method === 'DELETE') {
-      json(res, 200, { cancelled: true, stage: await operations.cancelImportStage(id, user.id, user.name || user.email) });
+      json(res, 200, { cancelled: true, stage: await operations.cancelImportStage(id, user.id, actor) });
       return true;
     }
   }
   if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/export`) {
-    download(res, await operations.exportCatalog(url.searchParams.get('format') || 'json'));
+    download(res, await operations.exportCatalog(url.searchParams.get('format') || 'json', actor));
     return true;
   }
   if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/backups`) {
@@ -110,7 +124,7 @@ export async function handleAdminOperationsRequest(req, res, url, user, operatio
   }
   if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/admin/backups`) {
     const body = await parseBody(req);
-    json(res, 201, await operations.createBackup(body.format || 'json'));
+    json(res, 201, await operations.createBackup(body.format || 'json', actor));
     return true;
   }
   if (req.method === 'GET' && url.pathname.match(new RegExp(`^${env.apiBasePath}/admin/backups/\\d+/download$`))) {
