@@ -82,7 +82,9 @@ try {
     {
       tableName: 'student_complaints',
       indexName: 'idx_student_complaints_created_id',
-      sql: `SELECT c.id,c.created_at FROM public.student_complaints c
+      sql: `SELECT c.*, submitter.name AS current_submitter_name,
+        modifier.name AS last_modified_by_name, assignee.name AS assigned_to_name,
+        assigner.name AS assigned_by_name FROM public.student_complaints c
         LEFT JOIN public.app_users submitter ON submitter.id=c.submitted_by
         LEFT JOIN public.app_users modifier ON modifier.id=c.last_modified_by
         LEFT JOIN public.app_users assignee ON assignee.id=c.assigned_to
@@ -92,7 +94,8 @@ try {
     {
       tableName: 'communication_outbox',
       indexName: 'idx_communication_outbox_created_id',
-      sql: `SELECT c.id,c.created_at FROM public.communication_outbox c
+      sql: `SELECT c.id,c.kind,c.subject,c.body,c.status,c.created_at,
+        u.name AS recipient_name,u.email AS recipient_email FROM public.communication_outbox c
         JOIN public.app_users u ON u.id=c.recipient_id
         ORDER BY c.created_at DESC,c.id DESC LIMIT 50 OFFSET 0`
     }
