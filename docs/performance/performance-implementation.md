@@ -32,6 +32,6 @@ Passed on this branch: `npm run check`, `npm run test:dashboard-analytics-perfor
 - Dashboard summary still reads the catalog snapshot. A disposable PostgreSQL fixture and query plans are needed to decide whether aggregate SQL can reduce database work without changing role-scoped semantics.
 - Logo PNG source size (155,898 bytes) was observed, but no logo conversion was completed.
 - Desktop/mobile browser rendering, transfer sizes, and layout-shift behavior for the resized backgrounds remain unverified; static source files were visually inspected only.
-- No authenticated browser journey, API P50/P95, PostgreSQL query timing/plan, provider latency, or staging comparison was available. Those end-to-end results remain unverified.
+- No authenticated browser journey, API P50/P95, PostgreSQL query timing/plan, provider latency, or browser viewport comparison was collected. The PR Vercel preview redirected unauthenticated requests to the Vercel login page, so those responses were discarded as invalid app measurements. The PR Netlify preview timed out from this runner and was not used as a substitute for the active Vercel host.
 
 No migration, production configuration, hosted data, deployment, or external service was changed.
