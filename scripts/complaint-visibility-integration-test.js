@@ -43,14 +43,40 @@ try {
   assert.equal(listed.current_submitter_name, student.name);
   assert.equal(listed.email, student.email);
   assert.equal(listed.assigned_to, null);
+  await query(`INSERT INTO public.student_complaints (student_id,email,message,submitted_by,submitted_name)
+    SELECT $1,$2,'Synthetic pagination fixture ' || series::text,$3,$4
+      FROM generate_series(1,120) AS series`, [`PERF-${suffix.slice(0, 12)}`, student.email, student.id, student.name]);
+  const fullComplaintList = await listComplaints();
   const complaintPage = await listComplaints({ limit: 1, offset: 0 });
   assert.equal(complaintPage.items.length, 1);
-  assert.ok(complaintPage.total >= 1);
+  assert.ok(complaintPage.total >= 120);
   assert.equal(complaintPage.limit, 1);
-  assert.equal(complaintPage.items.some((item) => item.id === complaintId), true);
+  assert.equal(complaintPage.total, fullComplaintList.length);
+  assert.ok(Buffer.byteLength(JSON.stringify(complaintPage)) < Buffer.byteLength(JSON.stringify(fullComplaintList)));
+  const complaintPayloadBytes = {
+    fullHistory: Buffer.byteLength(JSON.stringify(fullComplaintList)),
+    page: Buffer.byteLength(JSON.stringify(await listComplaints({ limit: 50, offset: 0 })))
+  };
+  assert.equal(complaintPayloadBytes.page < complaintPayloadBytes.fullHistory, true);
+
+  await query(`INSERT INTO public.communication_outbox (recipient_id,sender_id,kind,subject,body,status)
+    SELECT $1,$2,'message','Synthetic pagination fixture',repeat('x',1024),'queued'
+      FROM generate_series(1,120)`, [student.id, reviewer.id]);
+  const fullCommunicationList = await listCommunications();
   const communicationPage = await listCommunications({ limit: 5, offset: 0 });
   assert.ok(communicationPage.items.length <= 5);
-  assert.equal(typeof communicationPage.total, 'number');
+  assert.equal(communicationPage.total, fullCommunicationList.length);
+  const communicationPayloadBytes = {
+    fullHistory: Buffer.byteLength(JSON.stringify(fullCommunicationList)),
+    page: Buffer.byteLength(JSON.stringify(await listCommunications({ limit: 50, offset: 0 })))
+  };
+  assert.equal(communicationPayloadBytes.page < communicationPayloadBytes.fullHistory, true);
+  console.log(JSON.stringify({
+    supportPaginationPayloadBytes: {
+      complaints: { records: fullComplaintList.length, ...complaintPayloadBytes },
+      communications: { records: fullCommunicationList.length, ...communicationPayloadBytes }
+    }
+  }));
 
   legacyEmail = `legacy-complaint-${suffix}@example.test`;
   legacyComplaintId = (await query('INSERT INTO public.student_complaints (student_id,email,message) VALUES ($1,$2,$3) RETURNING id', [`LEGACY-${suffix.slice(0, 12)}`, legacyEmail, 'Historical fixture without identity metadata'])).rows[0].id;
