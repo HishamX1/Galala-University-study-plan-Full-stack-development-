@@ -1,5 +1,7 @@
 # Deployment checklist
 
+The owner confirms that the active frontend host is Vercel and the backend is Render. Vercel project settings are not defined in this repository and must be checked in the authorized Vercel dashboard; root `netlify.toml` is retained legacy configuration and is not the active deployment source.
+
 ## Backend On Render
 
 Use `render.yaml` or create a Render Web Service manually. The manifest uses `npm ci` and starts only after configuration and database connectivity validation succeed.
@@ -13,7 +15,7 @@ Required env vars:
 - `DATABASE_URL=<Supabase pooled Postgres URL>`
 - `PG_SSL=true`
 - `API_BASE_PATH=/api`
-- `CORS_ORIGIN=<Netlify site origin>`
+- `CORS_ORIGIN=<Vercel production site origin>`
 - `JWT_SECRET=<long random secret>`
 - `COOKIE_SECURE=true`
 - `COOKIE_SAME_SITE=None` when the frontend and API have different origins
@@ -21,11 +23,13 @@ Required env vars:
 
 Set `NODE_ENV=production`. Do not set `CORS_ORIGIN=*`; startup rejects it. Keep the API deployment's public root route available for the host health check; `/api/health` is Super Admin-only.
 
-## Frontend On Netlify
+## Frontend on Vercel
 
-The root `netlify.toml` publishes `frontend`.
+The static frontend files live in `frontend/`. Confirm in the Vercel project dashboard that the configured project root/output and route handling publish those files correctly. Do not infer Vercel settings from the legacy `netlify.toml`.
 
-Set the deployed backend API URL in `frontend/config.js`:
+Set the backend API URL in `frontend/config.js`; the checked-in runtime default currently points to the Render API. Vercel dashboard build, environment, routing, and security-header settings remain external verification items.
+
+The frontend API origin must be allowed by the backend's exact `CORS_ORIGIN`/`CORS_ORIGINS` configuration. Vercel preview origins should be added only if intentionally authorized.
 
 ```js
 window.__GU_API_BASE__ = 'https://your-render-backend.onrender.com/api';
@@ -33,13 +37,13 @@ window.__GU_API_BASE__ = 'https://your-render-backend.onrender.com/api';
 
 The browser will also accept `?apiBase=https://your-render-backend.onrender.com/api` or the admin login API base field for temporary testing.
 
-The exact Netlify URL must be the backend `CORS_ORIGIN`. Because Netlify and Render are separate origins, `COOKIE_SAME_SITE=None` and HTTPS (`COOKIE_SECURE=true`) are required for login cookies to accompany API requests.
+Because Vercel and Render are separate origins, `COOKIE_SAME_SITE=None` and HTTPS (`COOKIE_SECURE=true`) are required for login cookies to accompany API requests. Verify the deployed Vercel routes `/`, `/student`, and `/admin` in the provider dashboard/browser; this repository does not contain Vercel routing configuration.
 
-Netlify routes:
+`netlify.toml` remains in the repository as legacy configuration pending a separately approved cleanup. It is not part of the active Vercel release procedure.
 
-- `/` -> `index.html`
-- `/student` -> `student/index.html`
-- `/admin` -> `admin/index.html`
+### Student password-reset email
+
+For email-based student recovery, also configure `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and `PUBLIC_APP_URL` as backend-only Render environment variables. Verify the Resend sending domain and sender before a controlled test. The API intentionally reports temporary unavailability when these values are missing or invalid; do not place the API key in Vercel or the frontend. See [student password reset by email](student-password-reset-email.md).
 
 ## Checks
 

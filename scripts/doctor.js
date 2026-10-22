@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { env, validateStartupConfig } from '../backend/src/config/env.js';
 import { closePool, getDatabaseReadiness } from '../backend/src/db/client.js';
 import { countUsers } from '../backend/src/services/authService.js';
+import { getPasswordResetEmailConfig } from '../backend/src/services/passwordResetEmailService.js';
 import { getSchemaMigrationState } from './migration-preflight.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -20,6 +21,12 @@ check(Boolean(env.jwtSecret) && (env.nodeEnv !== 'production' || Boolean(process
 check(Boolean(env.corsOrigins.length) && (env.nodeEnv !== 'production' || !env.corsOrigins.includes('*')), 'CORS_ORIGIN configured');
 check(env.nodeEnv !== 'production' || env.cookieSecure, 'COOKIE_SECURE enabled for production');
 check(['Lax', 'Strict', 'None'].includes(env.cookieSameSite) && (env.cookieSameSite !== 'None' || env.cookieSecure), 'COOKIE_SAME_SITE compatible with secure cookies');
+try {
+  getPasswordResetEmailConfig();
+  check(true, 'Student password-reset email configuration');
+} catch {
+  check(false, 'Student password-reset email configuration', 'required backend settings are missing or invalid');
+}
 
 const database = await getDatabaseReadiness();
 check(database.connected, 'Database connection', database.connected ? 'connected' : database.error);
@@ -47,11 +54,10 @@ const frontendConfig = read(path.join(repositoryRoot, 'frontend', 'config.js'));
 check(/window\.__GU_API_BASE__/.test(frontendConfig), 'Frontend API configuration present');
 check(/guLocalApiHosts/.test(frontendConfig) && /http:\/\/localhost:4000\/api/.test(frontendConfig) && /http:\/\/127\.0\.0\.1:4000\/api/.test(frontendConfig), 'Frontend local API detection configured');
 check(/https:\/\/galala-university-study-plan-full-stack-kd69\.onrender\.com\/api/.test(frontendConfig), 'Frontend production API configured');
+check(fs.existsSync(path.join(repositoryRoot, 'frontend', 'index.html')), 'Static frontend entry point present');
 const render = read(path.join(repositoryRoot, 'render.yaml'));
-check(/NODE_ENV[\s\S]*production/.test(render) && /JWT_SECRET/.test(render), 'Render production environment declares NODE_ENV and JWT_SECRET');
-const netlify = read(path.join(repositoryRoot, 'netlify.toml'));
-check(/publish\s*=\s*"frontend"/.test(netlify), 'Netlify publish directory');
-check(/X-Content-Type-Options/.test(netlify) && /X-Frame-Options/.test(netlify), 'Netlify security headers');
+check(/NODE_ENV[\s\S]*production/.test(render) && /JWT_SECRET/.test(render), 'Render source manifest declares production runtime settings');
+console.log('ℹ Provider dashboard settings are not inspected here. Confirm Vercel frontend and Render backend settings through their authorized dashboards; netlify.toml is retained legacy configuration.');
 
 await closePool();
 console.log(`\n${failed ? 'Doctor found issues. Resolve every ✗ before production deployment.' : 'Doctor passed. Deployment prerequisites look ready.'}`);

@@ -145,6 +145,7 @@ jobs:
           npm run test:api-config &&
           npm run test:error-disclosure &&
           npm run test:foundation &&
+          npm run test:doctor-contract &&
           npm run test:dashboard &&
           npm run check:dashboard-quick-access &&
           npm run test:dashboard-quick-access &&
