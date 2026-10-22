@@ -3,6 +3,7 @@ import { elements, setMessage } from './adminDom.js';
 import { loadRelations } from './dataLoader.js';
 import { loadAdminOps } from './adminOps.js';
 import { signOut } from '../../shared/session.js';
+import { cache } from './state.js';
 
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[char]);
 
@@ -85,6 +86,7 @@ export function setupLogin() {
 
   request('/auth/me').then(async ({ user }) => {
     if (!['regular_admin', 'super_admin'].includes(user.role)) { window.location.assign('../denied.html'); return; }
+    cache.adminRole = user.role;
     elements.loginCard.hidden = true;
     elements.dashboard.hidden = false;
     document.querySelector('[data-user-name]')?.replaceChildren(document.createTextNode(`${user.name} (${user.role.replace('_', ' ')})`));

@@ -118,13 +118,13 @@ export async function getFaculties() {
   return rows.map(mapFaculty);
 }
 
-export async function createFaculty(data) {
+export async function createFaculty(data, actor = null) {
   try {
     return await withPostgresClient(async (client) => {
       await client.query('BEGIN');
       try {
         const created = await insertFaculty(data.name.trim(), client);
-        await logAdminAction(client, { action: 'Created Faculty', entity: 'faculty', entityId: created.id, newValues: created, description: `Created faculty ${created.name}` });
+        await logAdminAction(client, { action: 'Created Faculty', entity: 'faculty', entityId: created.id, newValues: created, description: `Created faculty ${created.name}`, actor });
         await client.query('COMMIT');
         return mapFaculty(created);
       } catch (error) {
@@ -138,7 +138,7 @@ export async function createFaculty(data) {
   }
 }
 
-export async function updateFaculty(id, data) {
+export async function updateFaculty(id, data, actor = null) {
   try {
     return await withPostgresClient(async (client) => {
       await client.query('BEGIN');
@@ -154,7 +154,7 @@ export async function updateFaculty(id, data) {
           if (data.expectedVersion && (await findActiveFaculty(id, client)).rowCount) throw staleWrite();
           return false;
         }
-        await logAdminAction(client, { action: 'Updated Faculty', entity: 'faculty', entityId: id, oldValues: current.rows[0], newValues: rows[0], description: `Updated faculty ${rows[0].name}` });
+        await logAdminAction(client, { action: 'Updated Faculty', entity: 'faculty', entityId: id, oldValues: current.rows[0], newValues: rows[0], description: `Updated faculty ${rows[0].name}`, actor });
         await client.query('COMMIT');
         return mapFaculty(rows[0]);
       } catch (error) {
@@ -168,7 +168,7 @@ export async function updateFaculty(id, data) {
   }
 }
 
-export async function deleteFaculty(id, expectedVersion) {
+export async function deleteFaculty(id, expectedVersion, actor = null) {
   return withPostgresClient(async (client) => {
     await client.query('BEGIN');
     try {
@@ -189,7 +189,7 @@ export async function deleteFaculty(id, expectedVersion) {
         if (expectedVersion && (await findActiveFaculty(id, client)).rowCount) throw staleWrite();
         return false;
       }
-      await logAdminAction(client, { action: 'Deleted Faculty', entity: 'faculty', entityId: id, oldValues: current.rows[0], description: `Moved faculty ${current.rows[0].name} to recycle bin` });
+      await logAdminAction(client, { action: 'Deleted Faculty', entity: 'faculty', entityId: id, oldValues: current.rows[0], description: `Moved faculty ${current.rows[0].name} to recycle bin`, actor });
       await client.query('COMMIT');
       return rowCount > 0;
     } catch (error) {
@@ -204,13 +204,13 @@ export async function getPrograms(facultyId) {
   return rows.map(mapProgram);
 }
 
-export async function createProgram(data) {
+export async function createProgram(data, actor = null) {
   try {
     return await withPostgresClient(async (client) => {
       await client.query('BEGIN');
       try {
         const created = await insertProgram(data, client);
-        await logAdminAction(client, { action: 'Created Program', entity: 'program', entityId: created.id, newValues: created, description: `Created program ${created.name}` });
+        await logAdminAction(client, { action: 'Created Program', entity: 'program', entityId: created.id, newValues: created, description: `Created program ${created.name}`, actor });
         await client.query('COMMIT');
         return mapProgram(created);
       } catch (error) {
@@ -224,7 +224,7 @@ export async function createProgram(data) {
   }
 }
 
-export async function updateProgram(id, data) {
+export async function updateProgram(id, data, actor = null) {
   try {
     return await withPostgresClient(async (client) => {
       await client.query('BEGIN');
@@ -235,7 +235,7 @@ export async function updateProgram(id, data) {
           if (data.expectedVersion && (await findActiveProgram(id, client)).rowCount) throw staleWrite();
           return false;
         }
-        await logAdminAction(client, { action: 'Updated Program', entity: 'program', entityId: id, newValues: rows[0], description: `Updated program ${rows[0].name}` });
+        await logAdminAction(client, { action: 'Updated Program', entity: 'program', entityId: id, newValues: rows[0], description: `Updated program ${rows[0].name}`, actor });
         await client.query('COMMIT');
         return mapProgram(rows[0]);
       } catch (error) {
@@ -266,7 +266,7 @@ export async function getProgramDeleteImpact(id) {
   });
 }
 
-export async function deleteProgram(id, expectedVersion) {
+export async function deleteProgram(id, expectedVersion, actor = null) {
   return withPostgresClient(async (client) => {
     await client.query('BEGIN');
     try {
@@ -287,7 +287,7 @@ export async function deleteProgram(id, expectedVersion) {
         if (expectedVersion && (await findActiveProgram(id, client)).rowCount) throw staleWrite();
         return false;
       }
-      await logAdminAction(client, { action: 'Deleted Program', entity: 'program', entityId: id, oldValues: current.rows[0], description: `Moved program ${current.rows[0].name} to recycle bin` });
+      await logAdminAction(client, { action: 'Deleted Program', entity: 'program', entityId: id, oldValues: current.rows[0], description: `Moved program ${current.rows[0].name} to recycle bin`, actor });
       await client.query('COMMIT');
       return rowCount > 0;
     } catch (error) {
@@ -303,7 +303,7 @@ export async function getProgramCourses(filters = {}, options = {}) {
   return rows.map((row) => mapProgramCourse(row, prereqs.get(toInt(row.id)) || []));
 }
 
-export async function createProgramCourse(data) {
+export async function createProgramCourse(data, actor = null) {
   try {
     return await withPostgresClient(async (client) => {
       await client.query('BEGIN');
@@ -317,7 +317,7 @@ export async function createProgramCourse(data) {
         const courseId = (await upsertCourse(data.name.trim(), cleanText(data.description), client)).id;
         const programCourse = await insertProgramCourse(data, courseId, client);
         await replacePrerequisites(client, programCourse.id, data.prerequisiteCourseIds || []);
-        await logAdminAction(client, { action: 'Created Course', entity: 'course', entityId: programCourse.id, newValues: { ...data, id: programCourse.id }, description: `Created course ${data.code.trim().toUpperCase()}` });
+        await logAdminAction(client, { action: 'Created Course', entity: 'course', entityId: programCourse.id, newValues: { ...data, id: programCourse.id }, description: `Created course ${data.code.trim().toUpperCase()}`, actor });
         await client.query('COMMIT');
         return getProgramCourseById(programCourse.id);
       } catch (error) {
@@ -331,7 +331,7 @@ export async function createProgramCourse(data) {
   }
 }
 
-export async function updateProgramCourse(id, data) {
+export async function updateProgramCourse(id, data, actor = null) {
   try {
     return await withPostgresClient(async (client) => {
       await client.query('BEGIN');
@@ -367,7 +367,7 @@ export async function updateProgramCourse(id, data) {
         }
 
         const { expectedVersion: _expectedVersion, ...auditValues } = data;
-        await logAdminAction(client, { action: 'Updated Course', entity: 'course', entityId: id, oldValues: current.rows[0], newValues: auditValues, description: `Updated course ${data.code || current.rows[0].code}` });
+        await logAdminAction(client, { action: 'Updated Course', entity: 'course', entityId: id, oldValues: current.rows[0], newValues: auditValues, description: `Updated course ${data.code || current.rows[0].code}`, actor });
         await client.query('COMMIT');
         return getProgramCourseById(id);
       } catch (error) {
@@ -407,7 +407,7 @@ export async function getProgramCourseDeleteImpact(id) {
   });
 }
 
-export async function deleteProgramCourse(id, expectedVersion) {
+export async function deleteProgramCourse(id, expectedVersion, actor = null) {
   return withPostgresClient(async (client) => {
     await client.query('BEGIN');
     try {
@@ -423,7 +423,7 @@ export async function deleteProgramCourse(id, expectedVersion) {
         if (expectedVersion && (await findActiveProgramCourseSummary(id, client)).rowCount) throw staleWrite();
         return false;
       }
-      await logAdminAction(client, { action: 'Deleted Course', entity: 'course', entityId: id, oldValues: current.rows[0], description: `Moved course ${current.rows[0].code} to recycle bin` });
+      await logAdminAction(client, { action: 'Deleted Course', entity: 'course', entityId: id, oldValues: current.rows[0], description: `Moved course ${current.rows[0].code} to recycle bin`, actor });
       await client.query('COMMIT');
       return rowCount > 0;
     } catch (error) {
@@ -438,7 +438,7 @@ export async function getPrerequisites(programCourseId) {
   return (map.get(programCourseId) || []).map((relation) => relation.prerequisiteCourseId);
 }
 
-export async function updatePrerequisites(programCourseId, prerequisiteCourseIds, expectedUpdatedAt) {
+export async function updatePrerequisites(programCourseId, prerequisiteCourseIds, expectedUpdatedAt, actor = null) {
   await withPostgresClient(async (client) => {
     await client.query('BEGIN');
     try {
@@ -449,6 +449,7 @@ export async function updatePrerequisites(programCourseId, prerequisiteCourseIds
         return false;
       }
       await replacePrerequisites(client, programCourseId, prerequisiteCourseIds);
+      await logAdminAction(client, { action: 'Updated Prerequisites', entity: 'relation', entityId: programCourseId, newValues: { prerequisiteCourseIds }, description: 'Replaced prerequisite relationships', actor });
       await client.query('COMMIT');
       return true;
     } catch (error) {
@@ -459,7 +460,7 @@ export async function updatePrerequisites(programCourseId, prerequisiteCourseIds
   return getPrerequisites(programCourseId);
 }
 
-export async function addPrerequisiteRelation(programCourseId, prerequisiteCourseId, expectedUpdatedAt) {
+export async function addPrerequisiteRelation(programCourseId, prerequisiteCourseId, expectedUpdatedAt, actor = null) {
   if (Number(programCourseId) === Number(prerequisiteCourseId)) throw new Error('FK_SELF_RELATION');
   try {
     return await withPostgresClient(async (client) => {
@@ -468,7 +469,7 @@ export async function addPrerequisiteRelation(programCourseId, prerequisiteCours
         const touched = await touchProgramCourse(programCourseId, client, expectedUpdatedAt);
         if (!touched.rowCount && expectedUpdatedAt && await programCourseExists(programCourseId, client)) throw staleWrite();
         const rows = [await createPrerequisiteRow(programCourseId, prerequisiteCourseId, client)];
-        await logAdminAction(client, { action: 'Created Relation', entity: 'relation', entityId: rows[0].id, newValues: rows[0], description: 'Created prerequisite relationship' });
+        await logAdminAction(client, { action: 'Created Relation', entity: 'relation', entityId: rows[0].id, newValues: rows[0], description: 'Created prerequisite relationship', actor });
         await client.query('COMMIT');
         return mapPrerequisiteRelation(rows[0]);
       } catch (error) {
@@ -483,7 +484,7 @@ export async function addPrerequisiteRelation(programCourseId, prerequisiteCours
   }
 }
 
-export async function deletePrerequisiteRelation(programCourseId, prerequisiteCourseId, expectedUpdatedAt) {
+export async function deletePrerequisiteRelation(programCourseId, prerequisiteCourseId, expectedUpdatedAt, actor = null) {
   return withPostgresClient(async (client) => {
     await client.query('BEGIN');
     try {
@@ -494,7 +495,7 @@ export async function deletePrerequisiteRelation(programCourseId, prerequisiteCo
         await client.query('ROLLBACK');
         return false;
       }
-      if (rowCount) await logAdminAction(client, { action: 'Deleted Relation', entity: 'relation', entityId: rows[0].id, oldValues: rows[0], description: 'Moved prerequisite relationship to recycle bin' });
+      if (rowCount) await logAdminAction(client, { action: 'Deleted Relation', entity: 'relation', entityId: rows[0].id, oldValues: rows[0], description: 'Moved prerequisite relationship to recycle bin', actor });
       await client.query('COMMIT');
       return rowCount > 0;
     } catch (error) {
@@ -504,7 +505,7 @@ export async function deletePrerequisiteRelation(programCourseId, prerequisiteCo
   });
 }
 
-export async function updatePrerequisiteVisibility(programCourseId, prerequisiteCourseId, visibleToStudents, expectedUpdatedAt) {
+export async function updatePrerequisiteVisibility(programCourseId, prerequisiteCourseId, visibleToStudents, expectedUpdatedAt, actor = null) {
   return withPostgresClient(async (client) => {
     await client.query('BEGIN');
     try {
@@ -515,7 +516,7 @@ export async function updatePrerequisiteVisibility(programCourseId, prerequisite
         await client.query('ROLLBACK');
         return false;
       }
-      if (rowCount) await logAdminAction(client, { action: visibleToStudents ? 'Restored Relation Visibility' : 'Hidden Relation', entity: 'relation', entityId: rows[0].id, newValues: rows[0], description: `Relation ${visibleToStudents ? 'shown to' : 'hidden from'} students` });
+      if (rowCount) await logAdminAction(client, { action: visibleToStudents ? 'Restored Relation Visibility' : 'Hidden Relation', entity: 'relation', entityId: rows[0].id, newValues: rows[0], description: `Relation ${visibleToStudents ? 'shown to' : 'hidden from'} students`, actor });
       await client.query('COMMIT');
       return rowCount > 0;
     } catch (error) {

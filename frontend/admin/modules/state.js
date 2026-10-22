@@ -8,6 +8,8 @@ export const cache = {
   backups: [],
   importStages: [],
   systemHealth: null,
+  adminRole: null,
+  auditOffset: 0,
   courseSort: { key: 'code', direction: 'asc' }
 };
 

@@ -50,7 +50,7 @@ const operations = {
   async createImportStage(payload, user) { calls.push(['create', payload, user]); return { id: stageId, ...payload }; },
   async listImportStages(ownerId) { calls.push(['list', ownerId]); return []; },
   async getImportStage(id, ownerId) { calls.push(['get', id, ownerId]); return { id }; },
-  async cancelImportStage(id, ownerId, name) { calls.push(['cancel', id, ownerId, name]); return { id, status: 'cancelled' }; },
+  async cancelImportStage(id, ownerId, actor) { calls.push(['cancel', id, ownerId, actor]); return { id, status: 'cancelled' }; },
   async publishImportStage(id, ownerId, version, user) { calls.push(['publish', id, ownerId, version, user]); return { outcome: 'stale', code: 'IMPORT_PREVIEW_STALE', error: 'Review again.', stage: { id, previewVersion: 2 }, diff: { catalogReferencesChanged: true, addedErrors: [], resolvedErrors: [] } }; }
 };
 
@@ -72,7 +72,7 @@ assert.deepEqual(calls[2], ['get', stageId, admin.id]);
 const cancelRes = response();
 await handleAdminOperationsRequest(request('DELETE', `${base}/stages/${stageId}`), cancelRes,
   new URL(`${base}/stages/${stageId}`, 'http://localhost'), admin, operations);
-assert.deepEqual(calls[3], ['cancel', stageId, admin.id, admin.name]);
+assert.deepEqual(calls[3], ['cancel', stageId, admin.id, admin]);
 
 const staleRes = response();
 await handleAdminOperationsRequest(request('POST', `${base}/stages/${stageId}/publish`, '{"previewVersion":1}'), staleRes,

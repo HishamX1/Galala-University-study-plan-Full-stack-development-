@@ -94,10 +94,10 @@
         <button type="button" class="is-active" data-admin-tab="dashboard">Dashboard</button>
         <button type="button" data-admin-tab="catalog">Catalog</button>
         <button type="button" data-admin-tab="audit">Audit Logs</button>
-        <button type="button" data-admin-tab="recycle">Recycle Bin</button>
+        <button type="button" data-admin-tab="recycle" data-super-admin hidden>Recycle Bin</button>
         <button type="button" data-admin-tab="transfer">Import / Export</button>
         <button type="button" data-admin-tab="backup">Backup</button>
-        <button type="button" data-admin-tab="health">System Health</button>
+        <button type="button" data-admin-tab="health" data-super-admin hidden>System Health</button>
         <button type="button" data-admin-tab="users" data-super-admin hidden>User Management</button>
         <button type="button" data-admin-tab="requests" data-super-admin hidden>Requests & Complaints</button>
       </div>
@@ -180,17 +180,22 @@
           <div><label>Search</label><input id="auditSearch" placeholder="Search audit logs" /></div>
           <div><label>Range</label><select id="auditRange"><option value="">All</option><option value="today">Today</option><option value="week">This Week</option></select></div>
           <div><label>Entity</label><select id="auditEntity"><option value="">All</option><option value="faculty">Faculty</option><option value="program">Program</option><option value="course">Course</option><option value="relation">Relationship</option><option value="catalog">Catalog</option><option value="backup">Backup</option></select></div>
+          <div><label>Category</label><select id="auditCategory"><option value="">All</option><option value="catalog">Catalog</option><option value="import">Import</option><option value="backup">Backup</option><option value="admin">Admin</option><option value="account">Account</option><option value="security">Security</option><option value="request">Requests</option><option value="communication">Communication</option></select></div>
+          <div><label>Actor</label><input id="auditActor" placeholder="Administrator name" /></div>
+          <div><label>From date</label><input id="auditFrom" type="date" /></div>
+          <div><label>Through date</label><input id="auditTo" type="date" /></div>
           <div><label>Order</label><select id="auditOrder"><option value="newest">Newest</option><option value="oldest">Oldest</option></select></div>
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Timestamp</th><th>Action</th><th>Entity</th><th>ID</th><th>Description</th></tr></thead>
+            <thead><tr><th>Timestamp</th><th>Action</th><th>Entity</th><th>ID</th><th>Actor</th><th>Category</th><th>Outcome</th><th>Request</th><th>Description</th></tr></thead>
             <tbody id="auditLogList"></tbody>
           </table>
         </div>
+        <div class="toolbar-grid"><button type="button" id="auditPrevious" disabled>Previous</button><span id="auditPage">Page 1</span><button type="button" id="auditNext" disabled>Next</button></div>
       </div>
 
-      <div data-admin-panel="recycle" hidden>
+      <div data-admin-panel="recycle" data-super-admin hidden>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Type</th><th>Item</th><th>Deleted Date</th><th>Deleted By</th><th>Dependencies</th><th>Actions</th></tr></thead>
@@ -234,7 +239,7 @@
         </div>
       </div>
 
-      <div data-admin-panel="health" hidden>
+      <div data-admin-panel="health" data-super-admin hidden>
         <div class="metric-grid" id="healthList"></div>
       </div>
 

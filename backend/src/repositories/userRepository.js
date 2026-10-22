@@ -6,6 +6,10 @@ export async function findActiveUserById(id, executor) {
   return (await executor.query('SELECT * FROM public.app_users WHERE id=$1 AND status=$2', [id, 'active'])).rows[0] || null;
 }
 
+export async function findUserByIdForUpdate(id, executor) {
+  return (await executor.query('SELECT id,name,email,role,status FROM public.app_users WHERE id=$1 FOR UPDATE', [id])).rows[0] || null;
+}
+
 export async function listUsers(executor) {
   return (await executor.query('SELECT id,name,email,student_id,role,status,created_at,updated_at FROM public.app_users ORDER BY created_at DESC')).rows;
 }

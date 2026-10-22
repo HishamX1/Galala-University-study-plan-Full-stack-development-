@@ -73,7 +73,7 @@ assert.equal(await handleAdminOperationsRequest(
   new URL(`${env.apiBasePath}/admin/audit-logs?range=week&entity=course`, 'http://localhost'),
   admin,
   { getAuditLogs: async (filters) => {
-    assert.deepEqual(filters, { range: 'week', entity: 'course', action: '', search: '', order: 'newest' });
+    assert.deepEqual(filters, { range: 'week', entity: 'course', action: '', search: '', order: 'newest', category: '', actorId: admin.id, actor: '', from: '', to: '', limit: undefined, offset: undefined });
     return [{ id: 7, action: 'Updated Course' }];
   } }
 ), true);
@@ -105,6 +105,15 @@ await handleApi(request('GET', `${env.apiBasePath}/admin/recycle-bin`), forbidde
 assert.equal(forbidden.statusCode, 403);
 assert.deepEqual(JSON.parse(forbidden.body), { error: 'You do not have permission to access this resource' });
 assert.equal(currentUserCalls, 1);
+
+const regularAdminAudit = response();
+const regularAdmin = { id: 'regular-admin-1', role: 'regular_admin' };
+assert.equal(await handleAdminOperationsRequest(
+  request('GET', `${env.apiBasePath}/admin/audit-logs?actorId=00000000-0000-4000-8000-000000000002`), regularAdminAudit,
+  new URL(`${env.apiBasePath}/admin/audit-logs?actorId=00000000-0000-4000-8000-000000000002`, 'http://localhost'), regularAdmin,
+  { getAuditLogs: async (filters) => { assert.equal(filters.actorId, regularAdmin.id, 'regular admins are forcibly scoped to their own activity'); return []; } }
+), true);
+assert.equal(regularAdminAudit.statusCode, 200);
 
 const options = response();
 await handleApi(request('OPTIONS', `${env.apiBasePath}/admin/users`), options,

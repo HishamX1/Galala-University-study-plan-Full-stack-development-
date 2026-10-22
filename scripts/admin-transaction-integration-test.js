@@ -5,7 +5,7 @@ import { requireIsolatedTestDatabase } from './helpers/require-isolated-test-dat
 requireIsolatedTestDatabase();
 
 const { closePool, query } = await import('../backend/src/db/client.js');
-const { createUser } = await import('../backend/src/services/authService.js');
+const { createManagedUser, createUser } = await import('../backend/src/services/authService.js');
 const { createBackup, createImportStage, publishImportStage } = await import('../backend/src/services/adminOpsService.js');
 const suffix = crypto.randomUUID().replaceAll('-', '');
 const partialFaculty = `Arch Phase 1 rollback ${suffix}`;
@@ -14,21 +14,30 @@ const auditFunction = `phase1_fail_audit_${suffix}`;
 const auditTrigger = `phase1_fail_audit_trigger_${suffix}`;
 const facultyFunction = `phase1_fail_faculty_${suffix}`;
 const facultyTrigger = `phase1_fail_faculty_trigger_${suffix}`;
+const userAuditFunction = `phase1_fail_user_audit_${suffix}`;
+const userAuditTrigger = `phase1_fail_user_audit_trigger_${suffix}`;
 let backupId;
 let importerId;
 let stageId;
+let auditActorId;
 
 async function count(sql, params = []) {
   return Number((await query(sql, params)).rows[0].count);
 }
 
 try {
-  const backup = await createBackup('json');
+  const auditActor = await createUser({ name: 'Admin Activity Test', email: `admin-activity-${suffix}@example.test`, password: 'Activity-Test-Password-123!', role: 'super_admin' });
+  auditActorId = auditActor.id;
+  const { rows: rlsRows } = await query("SELECT relrowsecurity FROM pg_class WHERE oid='public.admin_audit_logs'::regclass");
+  assert.equal(rlsRows[0]?.relrowsecurity, true, 'audit table must not be directly exposed through public API roles');
+  const backup = await createBackup('json', auditActor);
   backupId = backup.id;
   assert.ok(backup.id, 'successful backup must return a persisted id');
   assert.equal(await count('SELECT count(*)::int AS count FROM admin_backup_history WHERE id = $1', [backup.id]), 1);
   assert.equal(await count("SELECT count(*)::int AS count FROM admin_audit_logs WHERE entity = 'backup' AND entity_id = $1 AND action = 'Database Backup'", [backup.id]), 1,
     'backup record and audit row must commit together');
+  const backupAudit = (await query("SELECT actor_id,actor_role,category FROM admin_audit_logs WHERE entity='backup' AND entity_id=$1", [backup.id])).rows[0];
+  assert.deepEqual(backupAudit, { actor_id: auditActor.id, actor_role: 'super_admin', category: 'backup' }, 'backup audit captures the authenticated actor');
 
   const backupCountBeforeFailure = await count('SELECT count(*)::int AS count FROM admin_backup_history');
   await query(`CREATE FUNCTION public."${auditFunction}"() RETURNS trigger LANGUAGE plpgsql AS $phase1$
@@ -41,11 +50,25 @@ try {
   $phase1$`);
   await query(`CREATE TRIGGER "${auditTrigger}" BEFORE INSERT ON public.admin_audit_logs
     FOR EACH ROW EXECUTE FUNCTION public."${auditFunction}"()`);
-  await assert.rejects(() => createBackup('json'), /injected audit failure/);
+  await assert.rejects(() => createBackup('json', auditActor), /injected audit failure/);
   await query(`DROP TRIGGER "${auditTrigger}" ON public.admin_audit_logs`);
   await query(`DROP FUNCTION public."${auditFunction}"()`);
   assert.equal(await count('SELECT count(*)::int AS count FROM admin_backup_history'), backupCountBeforeFailure,
     'backup insert must roll back when its audit insert fails');
+
+  const managedUserEmail = `rollback-user-${suffix}@example.test`;
+  await query(`CREATE FUNCTION public."${userAuditFunction}"() RETURNS trigger LANGUAGE plpgsql AS $phase1$
+    BEGIN
+      IF NEW.action = 'Created User' THEN RAISE EXCEPTION 'injected managed-user audit failure'; END IF;
+      RETURN NEW;
+    END;
+  $phase1$`);
+  await query(`CREATE TRIGGER "${userAuditTrigger}" BEFORE INSERT ON public.admin_audit_logs FOR EACH ROW EXECUTE FUNCTION public."${userAuditFunction}"()`);
+  await assert.rejects(() => createManagedUser({ name: 'Rollback User', email: managedUserEmail, password: 'Rollback-User-Password-123!', role: 'student' }, auditActor), /injected managed-user audit failure/);
+  await query(`DROP TRIGGER "${userAuditTrigger}" ON public.admin_audit_logs`);
+  await query(`DROP FUNCTION public."${userAuditFunction}"()`);
+  assert.equal(await count('SELECT count(*)::int AS count FROM app_users WHERE email=$1', [managedUserEmail]), 0,
+    'managed-user creation must roll back when its audit insert fails');
 
   const importedAuditCountBefore = await count("SELECT count(*)::int AS count FROM admin_audit_logs WHERE action = 'Imported faculties'");
   const importer = await createUser({
@@ -81,6 +104,8 @@ try {
 
   console.log('Admin backup/audit atomicity and import-failure rollback integration tests passed.');
 } finally {
+  await query(`DROP TRIGGER IF EXISTS "${userAuditTrigger}" ON public.admin_audit_logs`).catch(() => {});
+  await query(`DROP FUNCTION IF EXISTS public."${userAuditFunction}"()`).catch(() => {});
   await query(`DROP TRIGGER IF EXISTS "${auditTrigger}" ON public.admin_audit_logs`).catch(() => {});
   await query(`DROP FUNCTION IF EXISTS public."${auditFunction}"()`).catch(() => {});
   await query(`DROP TRIGGER IF EXISTS "${facultyTrigger}" ON public.faculties`).catch(() => {});
@@ -90,6 +115,8 @@ try {
     await query('DELETE FROM admin_backup_history WHERE id = $1', [backupId]).catch(() => {});
   }
   if (stageId) await query("DELETE FROM admin_audit_logs WHERE entity = 'catalog_import_stage' AND new_values->>'stageId' = $1", [stageId]).catch(() => {});
+  if (auditActorId) await query('DELETE FROM admin_audit_logs WHERE actor_id=$1', [auditActorId]).catch(() => {});
   if (importerId) await query('DELETE FROM app_users WHERE id = $1', [importerId]).catch(() => {});
+  if (auditActorId) await query('DELETE FROM app_users WHERE id = $1', [auditActorId]).catch(() => {});
   await closePool();
 }

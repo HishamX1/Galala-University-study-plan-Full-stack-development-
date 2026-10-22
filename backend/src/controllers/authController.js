@@ -11,7 +11,7 @@ export async function handleAuthRequest(req, res, url, { sendResetEmail, publicA
   if (req.method === 'POST' && [`${env.apiBasePath}/auth/login`, `${env.apiBasePath}/auth/student-login`, `${env.apiBasePath}/auth/admin-login`].includes(path)) {
     const body = await parseBody(req);
     if (!body.identifier || !body.password) { json(res, 400, { error: 'Identifier and password are required' }); return true; }
-    const user = await authenticate(String(body.identifier), String(body.password));
+    const user = await authenticate(String(body.identifier), String(body.password), { requestId: req.requestId });
     if (!user) { json(res, 401, { error: 'Invalid credentials or inactive account' }); return true; }
     if (path.endsWith('/student-login') && user.role !== 'student') { json(res, 403, { error: 'This account belongs to the administrator portal.' }); return true; }
     if (path.endsWith('/admin-login') && !['regular_admin', 'super_admin'].includes(user.role)) { json(res, 403, { error: 'Student accounts must use the Student Portal.' }); return true; }
