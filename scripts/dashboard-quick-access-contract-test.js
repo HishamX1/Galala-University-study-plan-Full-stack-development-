@@ -86,8 +86,14 @@ assert.match(adminOps, /activateAdminTab\(quick\.dataset\.quick, cache\.adminRol
 assert.doesNotMatch(adminOps, /querySelector\(`\[data-admin-tab=/);
 assert.match(adminAuth, /activateAdminTab\(tab, role, document, window, \{ updateUrl: false \}\)/);
 assert.match(adminAuth, /await openRequestedAdminDestination\(user\.role\)/);
-assert.equal((adminAuth.match(/await Promise\.all\(\[loadRelations\(\), loadAdminOps\(\)\]\)/g) || []).length, 2,
-  'login and session restoration start independent catalog and operations initialization together');
+assert.equal((adminAuth.match(/await loadInitialAdminData\(user\.role\)/g) || []).length, 2,
+  'login and session restoration use the shared concurrent workspace initializer');
+assert.match(adminAuth, /const userDataPromise = request\('\/admin\/users'\);[\s\S]*?renderUsers\(users\)[\s\S]*?loadControlCenter\(userDataPromise\)/,
+  'super-admin account rendering and request assignment reuse one user-list request');
+assert.match(adminAuth, /let managedUsers = null;[\s\S]*?if \(managedUsers === null \|\| refresh\) managedUsers = \(await request\('\/admin\/users'\)\)\.users;/,
+  'user search and filters render from the in-memory list instead of refetching each keystroke');
+assert.equal((adminAuth.match(/await renderUsers\(null, true\)/g) || []).length, 3,
+  'user list refreshes after create, account updates, and password changes');
 const internalQuickActions = [...adminHtml.matchAll(/<button type="button" data-quick="([^"]+)">([\s\S]*?)<\/button>/g)].map((match) => [match[2].replace(/<svg[\s\S]*?<\/svg>/, '').replace(/<[^>]+>/g, '').trim(), match[1]]);
 assert.deepEqual(internalQuickActions, [
   ['Add faculty', 'catalog'], ['Add program', 'catalog'], ['Add course', 'catalog'], ['Manage relations', 'catalog'],

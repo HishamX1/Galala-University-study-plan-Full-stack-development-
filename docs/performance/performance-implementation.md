@@ -8,7 +8,9 @@ This implementation is based on `main` SHA `6b7f7e4c550a9478bf13d3fd0590640a2e18
 
 `backend/src/services/adminOpsService.js` now builds maps and sets in single passes for dashboard program counts, relationship counts, course reachability, and semester counts. The export formatter builds a reverse relationship lookup once instead of rescanning the entire relationship list for each program-course row. Output fields, metric meanings, and relationship ordering are retained.
 
-`frontend/admin/modules/auth.js` now starts the catalog load and admin-operations load concurrently after the administrator role is validated, both after interactive login and session restoration. They populate independent state and render separate panels; requested deep links are still activated after both complete. The number and contents of requests are unchanged. No browser journey timing was available, so the latency benefit is not quantified.
+`frontend/admin/modules/auth.js` starts catalog, admin-operations, and super-admin initialization together after role validation for both interactive login and session restoration. The super-admin account list and complaint assignment options share a single `/admin/users` request. The control-center request tables load in parallel with the other initial data, and requested deep links are activated after initialization completes. The number of requests is unchanged from session restoration; interactive login now also renders the user table from the already-required user request. No browser journey timing was available, so the latency benefit is not quantified.
+
+User search and role/status filters now render from the in-memory account list instead of fetching `/admin/users` on every input event. Account creation, account updates, and password changes explicitly refresh the list after a successful mutation. The request count for local search/filter interaction drops from one full user-list request per input event to zero; update refresh behavior is preserved.
 
 The landing background JPEG was resized from 4000×3000 to 2400×1800 and re-encoded at JPEG quality 86, shrinking from 3,275,543 bytes to 547,182 bytes (83.3%). The student-card background was resized from 1280×960 to 1100×825 at the same quality, shrinking from 500,863 bytes to 141,305 bytes (71.8%). Existing filenames and JPEG formats preserve current CSS references and browser compatibility. The candidate images were visually inspected, but browser rendering at desktop and mobile viewports was not available. The logo PNG was not changed.
 
@@ -28,7 +30,7 @@ Passed on this branch: `npm run check`, `npm run test:dashboard-analytics-perfor
 
 ## Remaining measurement work
 
-- Super-admin user and request data are still loaded in sequence during session restoration because the request renderer reuses the active-admin list populated by the user loader. A browser/API test is needed before changing that dependency or making secondary-tab data lazy.
+- Browser/API timing is still needed to quantify the super-admin initialization improvement and assess secondary-tab lazy loading.
 - Dashboard summary still reads the catalog snapshot. A disposable PostgreSQL fixture and query plans are needed to decide whether aggregate SQL can reduce database work without changing role-scoped semantics.
 - Logo PNG source size (155,898 bytes) was observed, but no logo conversion was completed.
 - Desktop/mobile browser rendering, transfer sizes, and layout-shift behavior for the resized backgrounds remain unverified; static source files were visually inspected only.

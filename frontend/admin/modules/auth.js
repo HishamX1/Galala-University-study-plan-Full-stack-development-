@@ -9,8 +9,9 @@ import { cache } from './state.js';
 
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[char]);
 
-async function loadControlCenter() {
-  const [resetData, complaintData, communicationData, userData] = await Promise.all([request('/admin/password-reset-requests'), request('/admin/complaints'), request('/admin/communications'), cache.complaintAdmins.length ? Promise.resolve(null) : request('/admin/users')]);
+async function loadControlCenter(adminUsersPromise = null) {
+  const userDataPromise = adminUsersPromise || (cache.complaintAdmins.length ? Promise.resolve(null) : request('/admin/users'));
+  const [resetData, complaintData, communicationData, userData] = await Promise.all([request('/admin/password-reset-requests'), request('/admin/complaints'), request('/admin/communications'), userDataPromise]);
   if (userData) cache.complaintAdmins = userData.users.filter((item) => ['regular_admin', 'super_admin'].includes(item.role) && item.status === 'active');
   const resets = document.getElementById('resetRequestList');
   const complaints = document.getElementById('complaintList');
@@ -92,8 +93,7 @@ export function setupLogin() {
       setMessage('success', `Welcome, ${user.name}`);
       // Catalog rendering and operations rendering use separate endpoints and
       // cache fields; start both after role validation, then open deep links.
-      await Promise.all([loadRelations(), loadAdminOps()]);
-      if (user.role === 'super_admin') await loadControlCenter();
+      await loadInitialAdminData(user.role);
       await openRequestedAdminDestination(user.role);
     } catch (error) {
       setMessage('error', error.message);
@@ -108,8 +108,11 @@ export function setupLogin() {
 
   document.getElementById('logoutBtn')?.addEventListener('click', () => signOut('../index.html'));
 
-  const renderUsers = async () => {
-    const { users } = await request('/admin/users');
+  let managedUsers = null;
+  const renderUsers = async (initialUsers = null, refresh = false) => {
+    if (initialUsers !== null) managedUsers = initialUsers;
+    if (managedUsers === null || refresh) managedUsers = (await request('/admin/users')).users;
+    const users = managedUsers;
     cache.complaintAdmins = users.filter((item) => ['regular_admin', 'super_admin'].includes(item.role) && item.status === 'active');
     const list = document.getElementById('managedUserList');
     const search = String(document.getElementById('userSearch')?.value || '').toLowerCase();
@@ -118,12 +121,21 @@ export function setupLogin() {
     const filtered = users.filter((u) => !search || [u.name, u.email, u.student_id].some((v) => String(v || '').toLowerCase().includes(search))).filter((u) => !role || u.role === role).filter((u) => !status || u.status === status);
     if (list) { list._users = users; list.innerHTML = filtered.map((u) => `<tr><td>${escapeHtml(u.name)}<small>${escapeHtml(u.student_id || 'No student ID')}</small></td><td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.role.replace('_', ' '))}</td><td>${escapeHtml(u.status)}</td><td class="user-actions"><button type="button" data-action="view" data-user-id="${escapeHtml(u.id)}" aria-label="View account details for ${escapeHtml(u.name)}">View</button><button type="button" data-action="edit" data-user-id="${escapeHtml(u.id)}" aria-label="Edit account details for ${escapeHtml(u.name)}">Edit</button><button type="button" data-action="reset" data-user-id="${escapeHtml(u.id)}" aria-label="Change password for ${escapeHtml(u.name)}">Change password</button><button type="button" data-action="${u.status === 'suspended' ? 'activate' : 'suspend'}" data-user-id="${escapeHtml(u.id)}">${u.status === 'suspended' ? 'Activate account' : 'Suspend account'}</button><button type="button" class="danger" data-action="delete" data-user-id="${escapeHtml(u.id)}" aria-label="Permanently delete account for ${escapeHtml(u.name)}">Delete account</button></td></tr>`).join('') || '<tr><td colspan="5">No matching users.</td></tr>'; }
   };
+  const loadInitialAdminData = async (role) => {
+    const tasks = [loadRelations(), loadAdminOps()];
+    if (role === 'super_admin') {
+      const userDataPromise = request('/admin/users');
+      tasks.push(userDataPromise.then(({ users }) => renderUsers(users)));
+      tasks.push(loadControlCenter(userDataPromise));
+    }
+    await Promise.all(tasks);
+  };
   document.getElementById('createManagedUser')?.addEventListener('click', async (event) => {
     const button = event.currentTarget;
     await withButtonBusy(button, async () => { setMessage('progress', 'Creating the account…');
     try {
       await request('/admin/users', { method: 'POST', body: JSON.stringify({ name: document.getElementById('managedUserName').value.trim(), email: document.getElementById('managedUserEmail').value.trim(), studentId: document.getElementById('managedUserStudentId').value.trim(), password: document.getElementById('managedUserPassword').value, role: document.getElementById('managedUserRole').value, status: document.getElementById('managedUserStatus').value }) });
-      setMessage('success', 'User account created. It is now available in the account list.'); await renderUsers();
+      setMessage('success', 'User account created. It is now available in the account list.'); await renderUsers(null, true);
     } catch (error) { setMessage('error', error.message); }
     });
   });
@@ -149,11 +161,11 @@ export function setupLogin() {
         await request(`/admin/users/${user.id}`, { method: 'PUT', body: JSON.stringify({ name:user.name,email:user.email,studentId:user.student_id || '',role:user.role,status:action === 'suspend' ? 'suspended' : 'active' }) });
         setMessage('success', action === 'suspend' ? `${user.name}'s account was suspended.` : `${user.name}'s account was reactivated.`);
       }
-      await renderUsers();
+      await renderUsers(null, true);
     } catch (error) { setMessage('error', error.message); }
     });
   });
-  dialog?.addEventListener('submit', async (event) => { event.preventDefault(); const form = event.target; const values = Object.fromEntries(new FormData(form)); await withButtonBusy(event.submitter || form.querySelector('button[type="submit"]'), async () => { setMessage('progress', form.id === 'resetUserForm' ? 'Changing the password…' : 'Saving account changes…'); try { await request(form.id === 'resetUserForm' ? `/admin/users/${dialog.dataset.userId}/reset-password` : `/admin/users/${dialog.dataset.userId}`, { method: form.id === 'resetUserForm' ? 'POST' : 'PUT', body: JSON.stringify(values) }); closeUserDialog(); setMessage('success', form.id === 'resetUserForm' ? 'The account password was changed successfully.' : 'Account details were updated successfully.'); await renderUsers(); } catch (error) { setMessage('error', error.message); } }); });
+  dialog?.addEventListener('submit', async (event) => { event.preventDefault(); const form = event.target; const values = Object.fromEntries(new FormData(form)); await withButtonBusy(event.submitter || form.querySelector('button[type="submit"]'), async () => { setMessage('progress', form.id === 'resetUserForm' ? 'Changing the password…' : 'Saving account changes…'); try { await request(form.id === 'resetUserForm' ? `/admin/users/${dialog.dataset.userId}/reset-password` : `/admin/users/${dialog.dataset.userId}`, { method: form.id === 'resetUserForm' ? 'POST' : 'PUT', body: JSON.stringify(values) }); closeUserDialog(); setMessage('success', form.id === 'resetUserForm' ? 'The account password was changed successfully.' : 'Account details were updated successfully.'); await renderUsers(null, true); } catch (error) { setMessage('error', error.message); } }); });
   document.getElementById('userDialogClose')?.addEventListener('click', closeUserDialog);
   dialog?.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') { event.preventDefault(); closeUserDialog(); return; }
@@ -172,7 +184,7 @@ export function setupLogin() {
     elements.dashboard.hidden = false;
     document.querySelector('[data-user-name]')?.replaceChildren(document.createTextNode(`${user.name} (${user.role.replace('_', ' ')})`));
     document.querySelectorAll('[data-super-admin]').forEach((item) => { item.hidden = user.role !== 'super_admin'; });
-    await Promise.all([loadRelations(), loadAdminOps()]); if (user.role === 'super_admin') { await renderUsers(); await loadControlCenter(); }
+    await loadInitialAdminData(user.role);
     await openRequestedAdminDestination(user.role);
   }).catch(() => { window.location.assign('../admin-login.html'); });
 
