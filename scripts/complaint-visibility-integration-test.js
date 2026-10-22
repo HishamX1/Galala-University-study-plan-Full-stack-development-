@@ -16,6 +16,8 @@ let legacyComplaintId;
 let studentEmail;
 let legacyEmail;
 let failedComplaintEmail;
+let performanceStudentId;
+let performanceMessagePrefix;
 const superAdmin = { id: null, role: 'super_admin', name: `Visibility Reviewer ${suffix}` };
 
 async function count(sql, params = []) {
@@ -43,9 +45,46 @@ try {
   assert.equal(listed.current_submitter_name, student.name);
   assert.equal(listed.email, student.email);
   assert.equal(listed.assigned_to, null);
+  performanceStudentId = student.id;
+  performanceMessagePrefix = `Synthetic pagination fixture ${suffix}`;
   await query(`INSERT INTO public.student_complaints (student_id,email,message,submitted_by,submitted_name)
-    SELECT $1,$2,'Synthetic pagination fixture ' || series::text,$3,$4
-      FROM generate_series(1,120) AS series`, [`PERF-${suffix.slice(0, 12)}`, student.email, student.id, student.name]);
+    SELECT $1,$2,$3 || ' ' || series::text,$4,$5
+      FROM generate_series(1,20000) AS series`, [`PERF-${suffix.slice(0, 12)}`, student.email, performanceMessagePrefix, student.id, student.name]);
+  await query(`INSERT INTO public.communication_outbox (recipient_id,sender_id,kind,subject,body,status)
+    SELECT $1,$2,'message','Synthetic pagination fixture',repeat('x',1024),'queued'
+      FROM generate_series(1,20000)`, [student.id, reviewer.id]);
+  await query('ANALYZE public.student_complaints');
+  await query('ANALYZE public.communication_outbox');
+  const plans = {};
+  const planCases = [
+    {
+      tableName: 'student_complaints',
+      indexName: 'idx_student_complaints_created_id',
+      sql: `SELECT c.id,c.created_at FROM public.student_complaints c
+        LEFT JOIN public.app_users submitter ON submitter.id=c.submitted_by
+        LEFT JOIN public.app_users modifier ON modifier.id=c.last_modified_by
+        LEFT JOIN public.app_users assignee ON assignee.id=c.assigned_to
+        LEFT JOIN public.app_users assigner ON assigner.id=c.assigned_by
+        ORDER BY c.created_at DESC,c.id DESC LIMIT 50 OFFSET 0`
+    },
+    {
+      tableName: 'communication_outbox',
+      indexName: 'idx_communication_outbox_created_id',
+      sql: `SELECT c.id,c.created_at FROM public.communication_outbox c
+        JOIN public.app_users u ON u.id=c.recipient_id
+        ORDER BY c.created_at DESC,c.id DESC LIMIT 50 OFFSET 0`
+    }
+  ];
+  for (const { tableName, indexName, sql } of planCases) {
+    await query(`DROP INDEX IF EXISTS public.${indexName}`);
+    plans[`${tableName}WithoutIndex`] = (await query(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${sql}`)).rows[0]['QUERY PLAN'][0];
+    await query(`CREATE INDEX ${indexName} ON public.${tableName} (created_at DESC, id DESC)`);
+    plans[`${tableName}WithIndex`] = (await query(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${sql}`)).rows[0]['QUERY PLAN'][0];
+  }
+  console.log(JSON.stringify({ supportPaginationPlans: plans }));
+  await query('DROP INDEX IF EXISTS public.idx_student_complaints_created_id');
+  await query('DROP INDEX IF EXISTS public.idx_communication_outbox_created_id');
+
   const fullComplaintList = await listComplaints();
   const complaintPage = await listComplaints({ limit: 1, offset: 0 });
   assert.equal(complaintPage.items.length, 1);
@@ -59,9 +98,6 @@ try {
   };
   assert.equal(complaintPayloadBytes.page < complaintPayloadBytes.fullHistory, true);
 
-  await query(`INSERT INTO public.communication_outbox (recipient_id,sender_id,kind,subject,body,status)
-    SELECT $1,$2,'message','Synthetic pagination fixture',repeat('x',1024),'queued'
-      FROM generate_series(1,120)`, [student.id, reviewer.id]);
   const fullCommunicationList = await listCommunications();
   const communicationPage = await listCommunications({ limit: 5, offset: 0 });
   assert.ok(communicationPage.items.length <= 5);
@@ -155,6 +191,10 @@ try {
   if (legacyComplaintId) await query('DELETE FROM public.student_complaints WHERE id=$1', [legacyComplaintId]).catch(() => {});
   if (studentEmail) await query('DELETE FROM public.student_complaints WHERE email=$1', [studentEmail]).catch(() => {});
   if (failedComplaintEmail) await query('DELETE FROM public.student_complaints WHERE email=$1', [failedComplaintEmail]).catch(() => {});
+  if (performanceStudentId && performanceMessagePrefix) {
+    await query('DELETE FROM public.student_complaints WHERE submitted_by=$1 AND message LIKE $2', [performanceStudentId, `${performanceMessagePrefix}%`]).catch(() => {});
+    await query('DELETE FROM public.communication_outbox WHERE recipient_id=$1 AND subject=$2', [performanceStudentId, 'Synthetic pagination fixture']).catch(() => {});
+  }
   if (createdUserIds.length) {
     await query('DELETE FROM public.admin_audit_logs WHERE actor_id=ANY($1::uuid[])', [createdUserIds]).catch(() => {});
     await query('DELETE FROM public.app_users WHERE id=ANY($1::uuid[])', [createdUserIds]).catch(() => {});
