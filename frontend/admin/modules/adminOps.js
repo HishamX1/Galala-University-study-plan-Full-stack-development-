@@ -4,6 +4,7 @@ import { elements, setMessage } from './adminDom.js';
 import { loadRelations } from './dataLoader.js';
 import { openConfirmDialog } from './dialogs.js';
 import { cache } from './state.js';
+import { activateAdminTab } from '../../shared/adminNavigation.js';
 
 function fmtDate(value) {
   return value ? new Date(value).toLocaleString() : '-';
@@ -202,10 +203,7 @@ export function renderAdminOps() {
 export function bindAdminOpsActions() {
   document.querySelectorAll('[data-admin-tab]').forEach((button) => {
     button.addEventListener('click', () => {
-      document.querySelectorAll('[data-admin-tab]').forEach((item) => item.classList.toggle('is-active', item === button));
-      document.querySelectorAll('[data-admin-panel]').forEach((panel) => {
-        panel.hidden = panel.dataset.adminPanel !== button.dataset.adminTab;
-      });
+      activateAdminTab(button.dataset.adminTab, cache.adminRole);
     });
   });
 
@@ -236,7 +234,7 @@ export function bindAdminOpsActions() {
 
     try {
       if (quick) {
-        document.querySelector(`[data-admin-tab="${quick.dataset.quick}"]`)?.click();
+        if (!activateAdminTab(quick.dataset.quick, cache.adminRole)) setMessage('error', 'That administrator section is not available to your account.');
       }
       if (restore) {
         await request(`/admin/recycle-bin/${restore.dataset.kind}/${restore.dataset.restore}/restore`, { method: 'POST' });

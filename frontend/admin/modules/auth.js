@@ -3,6 +3,7 @@ import { elements, setMessage } from './adminDom.js';
 import { loadRelations } from './dataLoader.js';
 import { loadAdminOps } from './adminOps.js';
 import { signOut } from '../../shared/session.js';
+import { activateAdminTab, resolveAdminTab } from '../../shared/adminNavigation.js';
 import { cache } from './state.js';
 
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[char]);
@@ -36,14 +37,21 @@ async function showComplaintDetails(id) {
 
 async function openRequestedAdminDestination(role) {
   const params = new URLSearchParams(window.location.search);
-  const tab = params.get('tab');
-  if (!tab && !params.has('complaint')) return;
-  if (tab === 'requests' && role !== 'super_admin') {
-    setMessage('error', 'You do not have permission to view system-wide requests and complaints.');
+  const tab = params.get('tab') || (params.has('complaint') || params.has('resetRequest') ? 'requests' : null);
+  if (!tab) return;
+  const destination = resolveAdminTab(tab, role);
+  if (!destination.allowed) {
+    setMessage('error', destination.reason === 'forbidden'
+      ? 'You do not have permission to view that administrator section.'
+      : 'That administrator section is not available.');
+    activateAdminTab('dashboard', role);
     return;
   }
-  const allowed = new Set(['dashboard', 'catalog', 'audit', 'recycle', 'transfer', 'backup', 'health', 'users', 'requests']);
-  if (tab && allowed.has(tab)) document.querySelector(`[data-admin-tab="${tab}"]`)?.click();
+  if (!activateAdminTab(tab, role, document, window, { updateUrl: false })) {
+    setMessage('error', 'That administrator section is not available.');
+    activateAdminTab('dashboard', role);
+    return;
+  }
   const complaintId = params.get('complaint');
   if (complaintId && tab === 'requests' && role === 'super_admin') {
     await showComplaintDetails(complaintId);
@@ -73,6 +81,7 @@ export function setupLogin() {
     try {
       const { user } = await request('/auth/admin-login', { method: 'POST', body: JSON.stringify({ identifier: username, password }) });
       if (!['regular_admin', 'super_admin'].includes(user.role)) { window.location.assign('../denied.html'); return; }
+      cache.adminRole = user.role;
       elements.loginCard.hidden = true;
       elements.dashboard.hidden = false;
       document.querySelector('[data-user-name]')?.replaceChildren(document.createTextNode(`${user.name} (${user.role.replace('_', ' ')})`));
@@ -81,6 +90,7 @@ export function setupLogin() {
       await loadRelations();
       await loadAdminOps();
       if (user.role === 'super_admin') await loadControlCenter();
+      await openRequestedAdminDestination(user.role);
     } catch (error) {
       setMessage('error', error.message);
     }
