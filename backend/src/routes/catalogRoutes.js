@@ -55,7 +55,7 @@ function trustedStateChange(req) {
   return isAllowedCorsOrigin(req.headers.origin);
 }
 
-export async function handleApi(req, res, url, { resolveCurrentUser = currentUser } = {}) {
+export async function handleApi(req, res, url, { resolveCurrentUser = currentUser, sendResetEmail, publicAppUrl } = {}) {
   if (!url.pathname.startsWith(env.apiBasePath)) return false;
   const origin = req.headers.origin;
   if (origin && !applyCorsHeaders(req, res)) {
@@ -64,7 +64,8 @@ export async function handleApi(req, res, url, { resolveCurrentUser = currentUse
   if (req.method === 'OPTIONS') return json(res, 204, {});
   if (!trustedStateChange(req)) return json(res, 403, { error: 'Origin validation failed' });
 
-  const authSensitive = [`${env.apiBasePath}/auth/login`, `${env.apiBasePath}/auth/student-login`, `${env.apiBasePath}/auth/admin-login`, `${env.apiBasePath}/auth/password-reset-requests`];
+  const studentResetRequestPath = `${env.apiBasePath}/auth/student-password-reset-requests`;
+  const authSensitive = [`${env.apiBasePath}/auth/login`, `${env.apiBasePath}/auth/student-login`, `${env.apiBasePath}/auth/admin-login`, `${env.apiBasePath}/auth/password-reset-requests`, studentResetRequestPath];
   const signupPath = `${env.apiBasePath}/auth/student-signup`;
   const client = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
   const rateLimitResponse = (retryAfter = '60') => json(res, 429, { error: 'Too many requests. Please try again shortly.' }, { 'Retry-After': retryAfter });
@@ -74,9 +75,13 @@ export async function handleApi(req, res, url, { resolveCurrentUser = currentUse
   if (req.method === 'POST' && authSensitive.includes(url.pathname)) {
     if (!allowRequest(`${url.pathname}:${client}`, { limit: 10, windowMs: 60_000 })) return rateLimitResponse();
   }
+  if (req.method === 'POST' && url.pathname === studentResetRequestPath
+    && !allowRequest(`${url.pathname}:ip:${client}`, { limit: 5, windowMs: 15 * 60_000 })) {
+    return rateLimitResponse('900');
+  }
 
   try {
-    if (await handleAuthRequest(req, res, url)) return true;
+    if (await handleAuthRequest(req, res, url, { sendResetEmail, publicAppUrl })) return true;
 
     const user = await resolveCurrentUser(req);
     if (!user) return unauthorized(res);

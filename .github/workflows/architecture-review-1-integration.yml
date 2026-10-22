@@ -119,6 +119,9 @@ jobs:
       - name: Run static and database-free regressions
         run: >-
           npm run check &&
+          npm run check:password-reset-email &&
+          npm run test:password-reset-email-provider &&
+          npm run test:password-recovery-navigation &&
           npm run check:catalog-concurrency &&
           npm run test:catalog-concurrency &&
           npm run check:migration-preflight &&
@@ -148,4 +151,5 @@ jobs:
           npm run test:recycle-bin &&
           npm run test:admin-transactions &&
           npm run test:admin-import-staging &&
-          npm run test:catalog-crud
+          npm run test:catalog-crud &&
+          npm run test:password-reset-email

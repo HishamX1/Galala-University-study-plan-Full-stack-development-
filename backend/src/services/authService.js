@@ -4,7 +4,8 @@ import { env } from '../config/env.js';
 import { hashAndVerifyPassword, verifyPassword } from './passwordService.js';
 import { countSuperAdmins as countSuperAdminRows, countUsers as countUserRows, deleteUser as deleteUserRow, findActiveUserById, findActiveUserByIdentifier, findUserByIdentifier as findUserRow, insertUser, listUsers as listUserRows, updateManagedUser, updatePassword, updateProfile } from '../repositories/userRepository.js';
 import { createRefreshSession, findActiveRefreshSession, findPriorSessionCreatedAt, revokeRefreshSession, revokeUserRefreshSessions, tokenHash } from '../repositories/sessionRepository.js';
-import { createResetRequest, createResetToken, decideResetRequest, findOpenResetRequest, findResetEligibleUser, findUsableResetToken, listResetRequests, markResetTokenUsed, queueResetNotification } from '../repositories/recoveryRepository.js';
+import { countRecentStudentEmailResetTokens, createResetRequest, createResetToken, decideResetRequest, findActiveStudentByEmailForUpdate, findOpenResetRequest, findResetEligibleUser, findUsableResetToken, invalidateActiveResetTokens, listResetRequests, markResetTokenUsed, queueResetNotification } from '../repositories/recoveryRepository.js';
+import { getPasswordResetEmailConfig, sendPasswordResetEmail } from './passwordResetEmailService.js';
 import { createCommunicationRecord, createComplaintRecord, listAdminActivity, listCommunicationRecords, listComplaintRecords, listOpenComplaintNotifications, listOpenResetNotifications, listRecentBackupNotifications, listStudentActivity, listUserNotifications, updateComplaintRecord, userStatusCounts } from '../repositories/notificationRepository.js';
 
 // Access tokens are intentionally short-lived.  The refresh session, not the
@@ -213,6 +214,49 @@ export async function createPasswordResetRequest(identifier, message = '') {
   return createResetRequest(user, message, { query });
 }
 
+export async function createStudentPasswordResetRequest(email, { sendEmail, publicAppUrl, requestId = null, logger = console } = {}) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const sender = sendEmail || sendPasswordResetEmail;
+  const appUrl = sendEmail
+    ? String(publicAppUrl || '')
+    : getPasswordResetEmailConfig().publicAppUrl;
+  if (!appUrl) throw new Error('A public application URL is required by the email adapter.');
+
+  const reset = await withPostgresClient(async (client) => {
+    await client.query('BEGIN');
+    try {
+      const student = await findActiveStudentByEmailForUpdate(normalizedEmail, client);
+      if (!student || await countRecentStudentEmailResetTokens(student.id, client) >= 3) {
+        await client.query('COMMIT');
+        return null;
+      }
+
+      const token = crypto.randomBytes(32).toString('base64url');
+      const resetTokenHash = crypto.createHash('sha256').update(token).digest('hex');
+      await invalidateActiveResetTokens(student.id, client);
+      const tokenRecord = await createResetToken(student.id, resetTokenHash, client, 'student_email');
+      await client.query('COMMIT');
+      return { recipient: student.email, token, tokenId: tokenRecord.id };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    }
+  });
+
+  if (!reset) return { accepted: true };
+  const resetUrl = new URL('/reset-password.html', appUrl);
+  resetUrl.searchParams.set('token', reset.token);
+  resetUrl.searchParams.set('audience', 'student');
+  try {
+    await sender({ recipient: reset.recipient, resetUrl: resetUrl.href });
+  } catch {
+    try { await markResetTokenUsed(reset.tokenId, { query }); }
+    catch { logger.error?.(JSON.stringify({ requestId, event: 'student_password_reset_token_cleanup_failed' })); }
+    logger.warn?.(JSON.stringify({ requestId, event: 'student_password_reset_email_delivery_failed' }));
+  }
+  return { accepted: true };
+}
+
 export async function listPasswordResetRequests() {
   return listResetRequests({ query });
 }
@@ -236,7 +280,7 @@ export async function decidePasswordResetRequest(id, decision, actorId, note = '
         // The one-hour link is returned only once to the approving Super Admin,
         // who can send it through the registered email channel. The database
         // retains only its hash; no password or hash is ever exposed.
-        resetLink = `/reset-password.html?token=${encodeURIComponent(token)}`;
+        resetLink = `/reset-password.html?token=${encodeURIComponent(token)}&audience=admin`;
       }
       const updated = await decideResetRequest(id, decision === 'approve' ? 'approved' : 'rejected', actorId, note, client);
       await client.query('COMMIT'); return { ...updated, resetLink };
