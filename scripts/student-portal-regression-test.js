@@ -7,7 +7,6 @@ import { normalizeCatalog } from '../frontend/shared/catalogNormalizer.js';
 requireIsolatedTestDatabase();
 
 const { handleApi } = await import('../backend/src/routes/catalogRoutes.js');
-const { createUser } = await import('../backend/src/services/authService.js');
 const { closePool, query } = await import('../backend/src/db/client.js');
 
 const origin = 'http://127.0.0.1:5500';
@@ -35,7 +34,6 @@ try {
   if (!studentSource.includes("document.readyState === 'loading'") || !studentSource.includes('initializeStudentPortal();')) {
     throw new Error('Student portal initialization is not protected against session-restoration / DOMContentLoaded timing.');
   }
-  userId = (await createUser({ name: 'Student Portal Regression Test', email, studentId: `SP-${suffix}`, password, role: 'student', status: 'active' })).id;
   server = http.createServer(async (req, res) => {
     const handled = await handleApi(req, res, new URL(req.url, `http://${req.headers.host}`));
     if (handled === false) res.writeHead(404).end();
@@ -44,8 +42,31 @@ try {
   const port = server.address().port;
 
   if ((await request(port, '/api/catalog')).status !== 401) throw new Error('Student catalog must require an authenticated session.');
+  const invalidSignup = await request(port, '/api/auth/student-signup', 'POST', {
+    name: 'Student Portal Regression Test', email, studentId: `SP-${suffix.slice(0, 12)}`,
+    password, confirmPassword: 'a different password'
+  });
+  if (invalidSignup.status !== 400) throw new Error('Student signup must reject mismatched password confirmation.');
+  const absentAfterInvalidSignup = await query('SELECT id FROM public.app_users WHERE email=$1', [email]);
+  if (absentAfterInvalidSignup.rows.length) throw new Error('Invalid signup must not create an account.');
+
+  const signup = await request(port, '/api/auth/student-signup', 'POST', {
+    name: 'Student Portal Regression Test', email, studentId: `SP-${suffix.slice(0, 12)}`,
+    password, confirmPassword: password
+  });
+  if (signup.status !== 201) throw new Error(`Student signup failed with ${signup.status}.`);
+  const signedUp = JSON.parse(signup.body);
+  userId = signedUp.user?.id;
+  if (!userId || signedUp.user.role !== 'student' || signedUp.user.email !== email) throw new Error('Signup must create and return the expected student account.');
+  if ('password_hash' in signedUp.user || 'passwordHash' in signedUp.user) throw new Error('Signup response must not expose password hashes.');
+  const signupCookie = (signup.headers['set-cookie'] || []).map((value) => value.split(';')[0]).join('; ');
+  if (!signupCookie) throw new Error('Successful signup must establish the normal authenticated session.');
+  const signupSession = await request(port, '/api/auth/me', 'GET', null, signupCookie);
+  if (signupSession.status !== 200 || JSON.parse(signupSession.body).user.id !== userId) throw new Error('Newly registered student session was not restored.');
+
   const login = await request(port, '/api/auth/student-login', 'POST', { identifier: email, password });
   if (login.status !== 200) throw new Error('Student login failed.');
+  if (JSON.parse(login.body).user.id !== userId) throw new Error('Existing-account login must resolve to the registered student.');
   const cookie = (login.headers['set-cookie'] || []).map((value) => value.split(';')[0]).join('; ');
   const me = await request(port, '/api/auth/me', 'GET', null, cookie);
   if (me.status !== 200 || JSON.parse(me.body).user.role !== 'student') throw new Error('Student session restoration contract failed.');
