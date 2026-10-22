@@ -2,7 +2,13 @@ import { getApiCandidates, saveApiBase } from './shared/apiConfig.js';
 
 const form = document.querySelector('form[data-auth-mode]');
 const error = document.getElementById('auth-error');
+const status = document.getElementById('auth-status');
 const mode = form?.dataset.authMode;
+
+if (mode === 'student' && new URLSearchParams(location.search).get('passwordReset') === 'success' && status) {
+  status.textContent = 'Your password was updated successfully. Sign in with your new password.';
+  status.hidden = false;
+}
 
 document.getElementById('toggle-passwords')?.addEventListener('change', (event) => {
   document.querySelectorAll('input[name="password"], input[name="confirmPassword"]').forEach((input) => { input.type = event.target.checked ? 'text' : 'password'; });
