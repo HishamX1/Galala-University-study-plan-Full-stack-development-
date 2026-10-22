@@ -1,5 +1,6 @@
 import { getApiCandidates, saveApiBase } from './shared/apiConfig.js';
 import { portalPath, restoreSession, signOut } from './shared/session.js';
+import { adminQuickAccessActions } from './shared/adminNavigation.js';
 
 const avatars = ['👨🏻‍🎓','👨🏽‍💼','👨🏿‍🏫','👩🏻‍🎓','👩🏽‍💼','👩🏿‍🏫'];
 const labels = { student: 'Student', regular_admin: 'Academic Administrator', super_admin: 'Super Admin' };
@@ -17,9 +18,7 @@ async function api(path, options = {}) {
 function avatar(profile) { return profile.avatarData ? `<img class="avatar custom-image" src="${profile.avatarData}" alt="Custom avatar for ${escapeHtml(profile.name)}">` : `<span class="avatar" aria-label="Selected avatar">${avatars[Number((profile.avatarKey || 'avatar-1').split('-')[1]) - 1] || avatars[0]}</span>`; }
 function actions(role) {
   const student = [['Continue Study Plan', portalPath('student')], ['Search Course', `${portalPath('student')}#catalog`], ['Open Program', `${portalPath('student')}#catalog`], ['View Notifications', '#notifications'], ['View Profile', '#profile'], ['Change Password', './password-reset-request.html']];
-  const admin = [['Course Manager', portalPath('admin')], ['Add Course', `${portalPath('admin')}#courses`], ['Manage Relations', `${portalPath('admin')}#relations`], ['Import', `${portalPath('admin')}#import`], ['Program Management', `${portalPath('admin')}#programs`], ['Faculty Management', `${portalPath('admin')}#faculties`]];
-  const superAdmin = [['User Management', `${portalPath('admin')}#users`], ['Requests & Complaints', `${portalPath('admin')}#requests`], ['Audit Logs', `${portalPath('admin')}#audit`], ['Backup', `${portalPath('admin')}#backup`], ['Export', `${portalPath('admin')}#export`], ['Recycle Bin', `${portalPath('admin')}#recycle-bin`], ['System Health', `${portalPath('admin')}#system-health`], ['Student Portal', portalPath('student')], ['Admin Portal', portalPath('admin')]];
-  return role === 'student' ? student : role === 'regular_admin' ? admin : superAdmin;
+  return role === 'student' ? student : adminQuickAccessActions(role, portalPath('admin'), portalPath('student')) || [];
 }
 function card(title, body, extra = '') { return `<section class="dash-card ${extra}"><h2>${title}</h2>${body}</section>`; }
 function metrics(counts = {}) { return `<div class="metric-grid">${[['Faculties', counts.faculties],['Programs', counts.programs],['Courses', counts.courses],['Program courses', counts.programCourses],['Relationships', counts.relationships],['Hidden relations', counts.hiddenRelationships]].map(([k,v]) => `<div><strong>${v ?? 0}</strong><span>${k}</span></div>`).join('')}</div>`; }
