@@ -2,6 +2,18 @@ export async function findResetEligibleUser(identifier, executor) {
   return (await executor.query('SELECT id,role,status FROM public.app_users WHERE lower(email)=lower($1) OR student_id=$1 LIMIT 1', [identifier])).rows[0] || null;
 }
 
+export async function findActiveStudentByEmailForUpdate(email, executor) {
+  return (await executor.query("SELECT id,email FROM public.app_users WHERE lower(email)=lower($1) AND role='student' AND status='active' FOR UPDATE", [email])).rows[0] || null;
+}
+
+export async function countRecentStudentEmailResetTokens(userId, executor) {
+  return Number((await executor.query("SELECT count(*)::int AS count FROM public.password_reset_tokens WHERE user_id=$1 AND delivery_source='student_email' AND created_at >= now() - interval '1 hour'", [userId])).rows[0].count);
+}
+
+export async function invalidateActiveResetTokens(userId, executor) {
+  await executor.query('UPDATE public.password_reset_tokens SET used_at=now() WHERE user_id=$1 AND used_at IS NULL', [userId]);
+}
+
 export async function createResetRequest(user, message, executor) {
   return (await executor.query("INSERT INTO public.password_reset_requests (user_id,role,message) VALUES ($1,$2,$3) RETURNING id,user_id,role,status,message,created_at", [user.id, user.role, String(message || '').slice(0, 2000)])).rows[0] || null;
 }
@@ -15,8 +27,8 @@ export async function findOpenResetRequest(id, executor) {
   return (await executor.query('SELECT * FROM public.password_reset_requests WHERE id=$1 FOR UPDATE', [id])).rows[0] || null;
 }
 
-export async function createResetToken(userId, tokenHash, executor) {
-  await executor.query("INSERT INTO public.password_reset_tokens (user_id,token_hash,expires_at) VALUES ($1,$2,now()+interval '1 hour')", [userId, tokenHash]);
+export async function createResetToken(userId, tokenHash, executor, deliverySource = 'admin_approval') {
+  return (await executor.query("INSERT INTO public.password_reset_tokens (user_id,token_hash,expires_at,delivery_source) VALUES ($1,$2,now()+interval '1 hour',$3) RETURNING id,expires_at", [userId, tokenHash, deliverySource])).rows[0];
 }
 
 export async function queueResetNotification(userId, actorId, executor) {

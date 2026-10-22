@@ -1,9 +1,12 @@
 import { env } from '../config/env.js';
 import { json, parseBody } from '../middleware/http.js';
-import { authenticate, authCookies, clearAuthCookies, consumePasswordResetToken, createPasswordResetRequest, createSession, createUser, currentUser, logout, publicUser, refreshSession } from '../services/authService.js';
+import { authenticate, authCookies, clearAuthCookies, consumePasswordResetToken, createPasswordResetRequest, createSession, createStudentPasswordResetRequest, createUser, currentUser, logout, publicUser, refreshSession } from '../services/authService.js';
 import { validatePassword } from '../services/passwordService.js';
 
-export async function handleAuthRequest(req, res, url) {
+const STUDENT_RESET_RESPONSE = 'If an active student account matches this email, a reset link will be sent to its registered address. If you do not receive it, contact Student Support. This response does not confirm whether an account exists.';
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export async function handleAuthRequest(req, res, url, { sendResetEmail, publicAppUrl } = {}) {
   const path = url.pathname;
   if (req.method === 'POST' && [`${env.apiBasePath}/auth/login`, `${env.apiBasePath}/auth/student-login`, `${env.apiBasePath}/auth/admin-login`].includes(path)) {
     const body = await parseBody(req);
@@ -32,6 +35,21 @@ export async function handleAuthRequest(req, res, url) {
     if (!body.identifier) { json(res, 400, { error: 'Email or student ID is required.' }); return true; }
     await createPasswordResetRequest(String(body.identifier), body.message);
     json(res, 202, { message: 'If an active account matches that identifier, a reset request has been recorded.' });
+    return true;
+  }
+  if (req.method === 'POST' && path === `${env.apiBasePath}/auth/student-password-reset-requests`) {
+    const body = await parseBody(req, 4096);
+    const email = typeof body.email === 'string' ? body.email.trim() : '';
+    if (email.length > 254 || !EMAIL_PATTERN.test(email)) {
+      json(res, 400, { error: 'A valid registered email address is required.' });
+      return true;
+    }
+    await createStudentPasswordResetRequest(email, {
+      sendEmail: sendResetEmail,
+      publicAppUrl,
+      requestId: req.requestId
+    });
+    json(res, 202, { message: STUDENT_RESET_RESPONSE });
     return true;
   }
   if (req.method === 'POST' && path === `${env.apiBasePath}/auth/password-reset`) {

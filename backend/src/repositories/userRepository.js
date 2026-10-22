@@ -49,5 +49,5 @@ export async function findUserByIdentifier(identifier, executor) {
 }
 
 export async function updatePassword(id, passwordHash, executor) {
-  return (await executor.query('UPDATE public.app_users SET password_hash=$2,updated_at=now() WHERE id=$1 RETURNING id,name,email,student_id,password_hash,role,status,created_at,updated_at', [id, passwordHash])).rows[0] || null;
+  return (await executor.query('UPDATE public.app_users SET password_hash=$2,password_changed_at=now(),updated_at=now() WHERE id=$1 RETURNING id,name,email,student_id,password_hash,role,status,created_at,updated_at,password_changed_at', [id, passwordHash])).rows[0] || null;
 }
