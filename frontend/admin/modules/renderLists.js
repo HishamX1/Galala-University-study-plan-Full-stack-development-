@@ -10,7 +10,8 @@ export function renderOptions(el, items, label = 'name', value = 'id') {
 }
 
 function entityRow(label, id, kind) {
-  return `<div class="entity-row"><span>${escapeHtml(label)}</span><div class="actions"><button data-edit="${id}" data-kind="${kind}">Edit</button><button class="danger" data-delete="${id}" data-kind="${kind}">Delete</button></div></div>`;
+  const name = kind === 'course' ? 'course' : kind;
+  return `<div class="entity-row"><span>${escapeHtml(label)}</span><div class="actions"><button type="button" data-edit="${escapeHtml(id)}" data-kind="${name}" aria-label="Edit ${name}: ${escapeHtml(label)}">Edit ${name}</button><button type="button" class="danger" data-delete="${escapeHtml(id)}" data-kind="${name}" aria-label="Move ${name} to recycle bin: ${escapeHtml(label)}">Move to recycle bin</button></div></div>`;
 }
 
 function relationPill({ courseId, relatedCourse, visibleToStudents, prerequisiteCourseId, labelPrefix = '' }) {
@@ -21,6 +22,7 @@ function relationPill({ courseId, relatedCourse, visibleToStudents, prerequisite
       <button
         class="secondary relation-toggle"
         type="button"
+        aria-label="${visibleToStudents ? 'Hide' : 'Show'} prerequisite relation ${escapeHtml(relatedCourse.code)} ${visibleToStudents ? 'from' : 'to'} students"
         data-toggle-relation="true"
         data-course-id="${courseId}"
         data-prerequisite-id="${prerequisiteCourseId}"
@@ -88,7 +90,7 @@ export function renderLists() {
       <td>${escapeHtml(semester)}</td>
       <td><span class="relation-status ${hiddenCount ? 'is-hidden' : 'is-visible'}">${hiddenCount ? `${hiddenCount} hidden` : 'Visible'}</span></td>
       <td>${prerequisites.length} prereq · ${requiredFor.length} required-for</td>
-      <td><button data-view-course="${course.id}">Details</button> <button data-manage-relations="${course.id}">Relations</button></td>
+      <td><button type="button" data-view-course="${escapeHtml(course.id)}" aria-label="View course details: ${escapeHtml(course.code)} ${escapeHtml(course.name)}">View details</button> <button type="button" data-manage-relations="${escapeHtml(course.id)}" aria-label="Manage relationships for ${escapeHtml(course.code)} ${escapeHtml(course.name)}">Manage relationships</button></td>
     </tr>`;
   }).join('') || '<tr><td colspan="7">No courses found.</td></tr>';
 }

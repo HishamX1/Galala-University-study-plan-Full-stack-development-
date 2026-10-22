@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Galala University Study Plan Center - Admin</title>
   <link rel="stylesheet" href="../styles.css" />
+  <link rel="stylesheet" href="./admin.css" />
   <meta name="gu-api-base" content="" />
   <style>
     /* Static Background image layer - NO fading */
@@ -61,6 +62,18 @@
 <body>
   <a href="#main-content" class="skip-link">Skip to main content</a>
 
+  <svg class="admin-icon-library" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="admin-icon-dashboard" viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/></symbol>
+    <symbol id="admin-icon-catalog" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 5.5v15M8 7h8M8 11h8"/></symbol>
+    <symbol id="admin-icon-audit" viewBox="0 0 24 24"><path d="M4 4h16v16H4zM8 8h8M8 12h8M8 16h4"/><path d="m16 16 1.5 1.5L21 14"/></symbol>
+    <symbol id="admin-icon-recycle" viewBox="0 0 24 24"><path d="M7 7h10l-1 13H8zM5 7h14M9 7V4h6v3M10 11v5M14 11v5"/></symbol>
+    <symbol id="admin-icon-transfer" viewBox="0 0 24 24"><path d="M7 7h13l-3-3M20 7l-3 3M17 17H4l3 3M4 17l3-3"/></symbol>
+    <symbol id="admin-icon-backup" viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4M5 14v5h14v-5"/></symbol>
+    <symbol id="admin-icon-health" viewBox="0 0 24 24"><path d="M3 12h4l2-6 4 12 2-6h6"/></symbol>
+    <symbol id="admin-icon-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20v-1a6 6 0 0 1 12 0v1zM16 5.5a3 3 0 0 1 0 5.8M18 14a5 5 0 0 1 3 4.6v1.4"/></symbol>
+    <symbol id="admin-icon-requests" viewBox="0 0 24 24"><path d="M5 4h14v13H9l-4 3zM8 8h8M8 12h5"/></symbol>
+  </svg>
+
   <!-- Static Background Image Layer -->
   <div class="bg-layer"></div>
   <div class="bg-overlay"></div>
@@ -79,48 +92,51 @@
     </nav>
   </header>
 
-  <main id="main-content">
-    <section class="card" id="adminLoginCard" hidden>
+  <main id="main-content" class="admin-main">
+    <section class="card admin-login-card" id="adminLoginCard" hidden>
       <h2>Admin Login</h2>
-      <p class="error" id="authError"></p>
-      <label>Live API Base URL</label>
+      <p class="error" id="authError" role="alert" aria-live="assertive"></p>
+      <label for="apiBaseUrl">Live API Base URL</label>
       <input id="apiBaseUrl" placeholder="https://your-backend.example.com/api" />
       <div class="grid">
-        <div><label>Email or Student ID</label><input id="adminUsername" autocomplete="username" /></div>
-        <div><label>Password</label><input id="adminPassword" type="password" autocomplete="current-password" /></div>
+        <div><label for="adminUsername">Email or Student ID</label><input id="adminUsername" autocomplete="username" /></div>
+        <div><label for="adminPassword">Password</label><input id="adminPassword" type="password" autocomplete="current-password" /></div>
       </div>
       <button id="adminLoginBtn">Login</button>
     </section>
 
     <section class="card admin-shell" id="adminDashboard" hidden>
-      <h2>Admin Dashboard</h2>
-      <p data-user-name></p>
-      <button type="button" id="logoutBtn">Logout</button>
-      <p class="error" id="error"></p>
-      <p class="success" id="success"></p>
+      <div class="admin-workspace-heading">
+        <div><p class="admin-eyebrow">ACADEMIC AFFAIRS</p><h2>Administrator workspace</h2><p class="admin-workspace-copy">Manage the academic catalog and university operations from one place.</p></div>
+        <div class="admin-account-actions"><span data-user-name class="admin-user-badge"></span><button type="button" id="logoutBtn" class="secondary">Sign out</button></div>
+      </div>
+      <p class="error" id="error" role="alert" aria-live="assertive"></p>
+      <p class="success" id="success" role="status" aria-live="polite"></p>
+      <p class="admin-progress" id="progress" role="status" aria-live="polite" hidden></p>
 
       <div class="admin-tabs" role="tablist" aria-label="Admin sections">
-        <button type="button" class="is-active" data-admin-tab="dashboard">Dashboard</button>
-        <button type="button" data-admin-tab="catalog">Catalog</button>
-        <button type="button" data-admin-tab="audit">Audit Logs</button>
-        <button type="button" data-admin-tab="recycle" data-super-admin hidden>Recycle Bin</button>
-        <button type="button" data-admin-tab="transfer">Import / Export</button>
-        <button type="button" data-admin-tab="backup">Backup</button>
-        <button type="button" data-admin-tab="health" data-super-admin hidden>System Health</button>
-        <button type="button" data-admin-tab="users" data-super-admin hidden>User Management</button>
-        <button type="button" data-admin-tab="requests" data-super-admin hidden>Requests & Complaints</button>
+        <button type="button" role="tab" id="admin-tab-dashboard" aria-controls="admin-panel-dashboard" aria-selected="true" tabindex="0" class="is-active" data-admin-tab="dashboard"><svg class="admin-tab-icon" aria-hidden="true"><use href="#admin-icon-dashboard"></use></svg><span>Overview</span></button>
+        <button type="button" role="tab" id="admin-tab-catalog" aria-controls="admin-panel-catalog" aria-selected="false" tabindex="-1" data-admin-tab="catalog"><svg class="admin-tab-icon" aria-hidden="true"><use href="#admin-icon-catalog"></use></svg><span>Academic catalog</span></button>
+        <button type="button" role="tab" id="admin-tab-audit" aria-controls="admin-panel-audit" aria-selected="false" tabindex="-1" data-admin-tab="audit"><svg class="admin-tab-icon" aria-hidden="true"><use href="#admin-icon-audit"></use></svg><span>Audit logs</span></button>
+        <button type="button" role="tab" id="admin-tab-recycle" aria-controls="admin-panel-recycle" aria-selected="false" tabindex="-1" data-admin-tab="recycle" data-super-admin hidden><svg class="admin-tab-icon" aria-hidden="true"><use href="#admin-icon-recycle"></use></svg><span>Recycle bin</span></button>
+        <button type="button" role="tab" id="admin-tab-transfer" aria-controls="admin-panel-transfer" aria-selected="false" tabindex="-1" data-admin-tab="transfer"><svg class="admin-tab-icon" aria-hidden="true"><use href="#admin-icon-transfer"></use></svg><span>Import &amp; export</span></button>
+        <button type="button" role="tab" id="admin-tab-backup" aria-controls="admin-panel-backup" aria-selected="false" tabindex="-1" data-admin-tab="backup"><svg class="admin-tab-icon" aria-hidden="true"><use href="#admin-icon-backup"></use></svg><span>Backups</span></button>
+        <button type="button" role="tab" id="admin-tab-health" aria-controls="admin-panel-health" aria-selected="false" tabindex="-1" data-admin-tab="health" data-super-admin hidden><svg class="admin-tab-icon" aria-hidden="true"><use href="#admin-icon-health"></use></svg><span>System health</span></button>
+        <button type="button" role="tab" id="admin-tab-users" aria-controls="admin-panel-users" aria-selected="false" tabindex="-1" data-admin-tab="users" data-super-admin hidden><svg class="admin-tab-icon" aria-hidden="true"><use href="#admin-icon-users"></use></svg><span>User accounts</span></button>
+        <button type="button" role="tab" id="admin-tab-requests" aria-controls="admin-panel-requests" aria-selected="false" tabindex="-1" data-admin-tab="requests" data-super-admin hidden><svg class="admin-tab-icon" aria-hidden="true"><use href="#admin-icon-requests"></use></svg><span>Requests &amp; complaints</span></button>
       </div>
 
-      <div data-admin-panel="dashboard">
+      <div id="admin-panel-dashboard" role="tabpanel" aria-labelledby="admin-tab-dashboard" tabindex="0" data-admin-panel="dashboard">
+        <header class="admin-panel-heading"><div><h3>Overview</h3><p>Current catalog totals and recent administrative activity.</p></div></header>
         <div class="quick-actions">
-          <button type="button" data-quick="catalog">Add Faculty</button>
-          <button type="button" data-quick="catalog">Add Program</button>
-          <button type="button" data-quick="catalog">Add Course</button>
-          <button type="button" data-quick="catalog">Manage Relations</button>
-          <button type="button" data-quick="transfer">Import</button>
-          <button type="button" data-quick="transfer">Export</button>
-          <button type="button" data-quick="backup">Backup</button>
-          <button type="button" data-quick="audit">Audit Logs</button>
+          <button type="button" data-quick="catalog"><svg class="admin-tab-icon" aria-hidden="true"><use href="#admin-icon-users"></use></svg><span>Add faculty</span></button>
+          <button type="button" data-quick="catalog"><svg class="admin-tab-icon" aria-hidden="true"><use href="#admin-icon-catalog"></use></svg><span>Add program</span></button>
+          <button type="button" data-quick="catalog"><svg class="admin-tab-icon" aria-hidden="true"><use href="#admin-icon-catalog"></use></svg><span>Add course</span></button>
+          <button type="button" data-quick="catalog"><svg class="admin-tab-icon" aria-hidden="true"><use href="#admin-icon-requests"></use></svg><span>Manage relations</span></button>
+          <button type="button" data-quick="transfer"><svg class="admin-tab-icon" aria-hidden="true"><use href="#admin-icon-transfer"></use></svg><span>Import catalog</span></button>
+          <button type="button" data-quick="transfer"><svg class="admin-tab-icon" aria-hidden="true"><use href="#admin-icon-transfer"></use></svg><span>Export catalog</span></button>
+          <button type="button" data-quick="backup"><svg class="admin-tab-icon" aria-hidden="true"><use href="#admin-icon-backup"></use></svg><span>Create backup</span></button>
+          <button type="button" data-quick="audit"><svg class="admin-tab-icon" aria-hidden="true"><use href="#admin-icon-audit"></use></svg><span>Review audit logs</span></button>
         </div>
         <h3>Summary</h3>
         <div class="metric-grid" id="metricCards"></div>
@@ -130,34 +146,35 @@
         <ul class="activity-list" id="activityList"></ul>
       </div>
 
-      <div data-admin-panel="catalog" hidden>
+      <div id="admin-panel-catalog" role="tabpanel" aria-labelledby="admin-tab-catalog" tabindex="0" data-admin-panel="catalog" hidden>
+        <header class="admin-panel-heading"><div><h3>Academic catalog</h3><p>Create and maintain faculties, programs, courses, and their prerequisite relationships.</p></div></header>
         <div class="grid admin-grid">
           <div>
             <h3>Add Faculty</h3>
-            <label>Faculty Name</label><input id="facultyName" required />
+            <label for="facultyName">Faculty name</label><input id="facultyName" required />
             <button id="addFaculty">Add Faculty</button>
             <div id="facultyList" class="entity-list"></div>
           </div>
 
           <div>
             <h3>Add Program</h3>
-            <label>Faculty</label><select id="programFaculty" required></select>
-            <label>Program Name</label><input id="programName" required />
-            <label>Duration Years</label><select id="programDurationYears"><option value="4">4</option><option value="5">5</option></select>
+            <label for="programFaculty">Faculty</label><select id="programFaculty" required></select>
+            <label for="programName">Program name</label><input id="programName" required />
+            <label for="programDurationYears">Program duration</label><select id="programDurationYears"><option value="4">4 years</option><option value="5">5 years</option></select>
             <button id="addProgram">Add Program</button>
             <div id="programList" class="entity-list"></div>
           </div>
 
           <div>
             <h3>Add Course</h3>
-            <label>Program</label><select id="courseProgram" required></select>
-            <label>Year Number</label><input id="courseYearNo" type="number" min="1" max="5" required />
-            <label>Semester Number</label><input id="courseSemesterNo" type="number" min="1" max="10" required />
-            <label>Course Code</label><input id="courseCode" required />
-            <label>Course Name</label><input id="courseName" required />
-            <label>Credits</label><input id="courseCredits" type="number" min="0" max="30" required />
-            <label>Description</label><textarea id="courseDescription"></textarea>
-            <label>Prerequisites (course codes, comma-separated)</label><input id="coursePrereqs" placeholder="BMS115, BMS124" />
+            <label for="courseProgram">Program</label><select id="courseProgram" required></select>
+            <label for="courseYearNo">Academic year</label><input id="courseYearNo" type="number" min="1" max="5" required />
+            <label for="courseSemesterNo">Semester</label><input id="courseSemesterNo" type="number" min="1" max="10" required />
+            <label for="courseCode">Course code</label><input id="courseCode" required />
+            <label for="courseName">Course name</label><input id="courseName" required />
+            <label for="courseCredits">Credits</label><input id="courseCredits" type="number" min="0" max="30" required />
+            <label for="courseDescription">Description</label><textarea id="courseDescription"></textarea>
+            <label for="coursePrereqs">Prerequisite course codes (comma-separated)</label><input id="coursePrereqs" placeholder="BMS115, BMS124" />
             <button id="addCourse">Add Course</button>
           </div>
         </div>
@@ -166,15 +183,15 @@
           <h3>Course Manager</h3>
             <div class="course-workspace">
               <aside class="course-filters">
-                <label>Search Courses</label><input id="courseSearch" placeholder="Code, name, program, faculty" />
-                <label>Faculty</label><select id="courseFilterFaculty"><option value="">All faculties</option></select>
-                <label>Program</label><select id="courseFilterProgram"><option value="">All programs</option></select>
-                <label>Year</label><select id="courseFilterYear"><option value="">All years</option><option value="1">Year 1</option><option value="2">Year 2</option><option value="3">Year 3</option><option value="4">Year 4</option><option value="5">Year 5</option></select>
-                <label>Semester</label><select id="courseFilterSemester"><option value="">All semesters</option><option value="1">Semester 1</option><option value="2">Semester 2</option></select>
-                <label>Relations</label><select id="courseFilterRelations"><option value="">All courses</option><option value="prerequisites">Has prerequisites</option><option value="required-for">Has required-for</option><option value="none">No relations</option></select>
-                <label>Visibility</label><select id="courseFilterVisibility"><option value="">Visible and hidden</option><option value="visible">Visible only</option><option value="hidden">Contains hidden</option></select>
+                <label for="courseSearch">Search courses</label><input id="courseSearch" placeholder="Code, name, program, faculty" />
+                <label for="courseFilterFaculty">Filter by faculty</label><select id="courseFilterFaculty"><option value="">All faculties</option></select>
+                <label for="courseFilterProgram">Filter by program</label><select id="courseFilterProgram"><option value="">All programs</option></select>
+                <label for="courseFilterYear">Filter by academic year</label><select id="courseFilterYear"><option value="">All years</option><option value="1">Year 1</option><option value="2">Year 2</option><option value="3">Year 3</option><option value="4">Year 4</option><option value="5">Year 5</option></select>
+                <label for="courseFilterSemester">Filter by semester</label><select id="courseFilterSemester"><option value="">All semesters</option><option value="1">Semester 1</option><option value="2">Semester 2</option></select>
+                <label for="courseFilterRelations">Filter by relationships</label><select id="courseFilterRelations"><option value="">All courses</option><option value="prerequisites">Has prerequisites</option><option value="required-for">Has required-for</option><option value="none">No relations</option></select>
+                <label for="courseFilterVisibility">Filter by visibility</label><select id="courseFilterVisibility"><option value="">Visible and hidden</option><option value="visible">Visible only</option><option value="hidden">Contains hidden</option></select>
               </aside>
-            <div class="table-wrap course-table-wrap">
+            <div class="table-wrap course-table-wrap" role="region" aria-label="Course catalog results" tabindex="0">
             <table>
               <thead><tr><th><button class="sort-button" data-course-sort="code">Code</button></th><th><button class="sort-button" data-course-sort="name">Name</button></th><th>Program</th><th><button class="sort-button" data-course-sort="term">Term</button></th><th>Visibility</th><th>Links</th><th>Actions</th></tr></thead>
               <tbody id="courseList"></tbody>
@@ -184,18 +201,19 @@
         </div>
       </div>
 
-      <div data-admin-panel="audit" hidden>
+      <div id="admin-panel-audit" role="tabpanel" aria-labelledby="admin-tab-audit" tabindex="0" data-admin-panel="audit" hidden>
+        <header class="admin-panel-heading"><div><h3>Audit logs</h3><p>Search recorded system actions by date, category, actor, and affected record.</p></div></header>
         <div class="toolbar-grid">
-          <div><label>Search</label><input id="auditSearch" placeholder="Search audit logs" /></div>
-          <div><label>Range</label><select id="auditRange"><option value="">All</option><option value="today">Today</option><option value="week">This Week</option></select></div>
-          <div><label>Entity</label><select id="auditEntity"><option value="">All</option><option value="faculty">Faculty</option><option value="program">Program</option><option value="course">Course</option><option value="relation">Relationship</option><option value="catalog">Catalog</option><option value="backup">Backup</option></select></div>
-          <div><label>Category</label><select id="auditCategory"><option value="">All</option><option value="catalog">Catalog</option><option value="import">Import</option><option value="backup">Backup</option><option value="admin">Admin</option><option value="account">Account</option><option value="security">Security</option><option value="request">Requests</option><option value="communication">Communication</option></select></div>
-          <div><label>Actor</label><input id="auditActor" placeholder="Administrator name" /></div>
-          <div><label>From date</label><input id="auditFrom" type="date" /></div>
-          <div><label>Through date</label><input id="auditTo" type="date" /></div>
-          <div><label>Order</label><select id="auditOrder"><option value="newest">Newest</option><option value="oldest">Oldest</option></select></div>
+          <div><label for="auditSearch">Search the activity log</label><input id="auditSearch" placeholder="Action, description, request ID" /></div>
+          <div><label for="auditRange">Date range</label><select id="auditRange"><option value="">All time</option><option value="today">Today</option><option value="week">This week</option></select></div>
+          <div><label for="auditEntity">Affected area</label><select id="auditEntity"><option value="">All areas</option><option value="faculty">Faculty</option><option value="program">Program</option><option value="course">Course</option><option value="relation">Relationship</option><option value="catalog">Catalog</option><option value="backup">Backup</option></select></div>
+          <div><label for="auditCategory">Activity category</label><select id="auditCategory"><option value="">All categories</option><option value="catalog">Catalog</option><option value="import">Import</option><option value="backup">Backup</option><option value="admin">Admin</option><option value="account">Account</option><option value="security">Security</option><option value="request">Requests</option><option value="communication">Communication</option></select></div>
+          <div><label for="auditActor">Performed by</label><input id="auditActor" placeholder="Administrator name" /></div>
+          <div><label for="auditFrom">From date</label><input id="auditFrom" type="date" /></div>
+          <div><label for="auditTo">Through date</label><input id="auditTo" type="date" /></div>
+          <div><label for="auditOrder">Sort order</label><select id="auditOrder"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></div>
         </div>
-        <div class="table-wrap">
+        <div class="table-wrap" role="region" aria-label="Filtered audit log results" tabindex="0">
           <table>
             <thead><tr><th>Timestamp</th><th>Action</th><th>Entity</th><th>ID</th><th>Actor</th><th>Category</th><th>Outcome</th><th>Request</th><th>Description</th></tr></thead>
             <tbody id="auditLogList"></tbody>
@@ -204,8 +222,9 @@
         <div class="toolbar-grid"><button type="button" id="auditPrevious" disabled>Previous</button><span id="auditPage">Page 1</span><button type="button" id="auditNext" disabled>Next</button></div>
       </div>
 
-      <div data-admin-panel="recycle" data-super-admin hidden>
-        <div class="table-wrap">
+      <div id="admin-panel-recycle" role="tabpanel" aria-labelledby="admin-tab-recycle" tabindex="0" data-admin-panel="recycle" data-super-admin hidden>
+        <header class="admin-panel-heading"><div><h3>Recycle bin</h3><p>Review removed catalog records, restore them, or permanently delete reviewed items.</p></div></header>
+        <div class="table-wrap" role="region" aria-label="Recycle bin records" tabindex="0">
           <table>
             <thead><tr><th>Type</th><th>Item</th><th>Deleted Date</th><th>Deleted By</th><th>Dependencies</th><th>Actions</th></tr></thead>
             <tbody id="recycleBinList"></tbody>
@@ -213,14 +232,15 @@
         </div>
       </div>
 
-      <div data-admin-panel="transfer" hidden>
+      <div id="admin-panel-transfer" role="tabpanel" aria-labelledby="admin-tab-transfer" tabindex="0" data-admin-panel="transfer" hidden>
+        <header class="admin-panel-heading"><div><h3>Catalog import &amp; export</h3><p>Validate and stage incoming data for review, or export the current catalog.</p></div></header>
         <div class="grid admin-grid">
           <div>
             <h3>Bulk Import</h3>
-            <label>Type</label><select id="importType"><option value="faculties">Faculties</option><option value="programs">Programs</option><option value="programCourses">Program Courses</option><option value="relationships">Relationships</option></select>
-            <label>Format</label><select id="importFormat"><option value="json">JSON</option><option value="csv">CSV</option><option value="xlsx">Excel (.xlsx)</option><option value="pdf">Structured PDF table</option></select>
-            <label>File (for Excel or PDF)</label><input id="importFile" type="file" accept=".xlsx,.csv,.pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,application/pdf" />
-            <label>Content</label><textarea id="importContent" rows="10" placeholder='[{"name":"Faculty of Engineering"}]'></textarea>
+            <label for="importType">Catalog data type</label><select id="importType"><option value="faculties">Faculties</option><option value="programs">Programs</option><option value="programCourses">Program courses</option><option value="relationships">Relationships</option></select>
+            <label for="importFormat">File format</label><select id="importFormat"><option value="json">JSON</option><option value="csv">CSV</option><option value="xlsx">Excel (.xlsx)</option><option value="pdf">Structured PDF table</option></select>
+            <label for="importFile">Select a file (Excel, CSV, or PDF)</label><input id="importFile" type="file" accept=".xlsx,.csv,.pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,application/pdf" />
+            <label for="importContent">Paste JSON or CSV content</label><textarea id="importContent" rows="10" placeholder='[{"name":"Faculty of Engineering"}]'></textarea>
             <button type="button" id="validateImport">Validate</button>
             <button type="button" id="stageImport">Stage for Review</button>
             <div id="importPreview" class="import-preview"></div>
@@ -229,18 +249,19 @@
           </div>
           <div>
             <h3>Bulk Export</h3>
-            <label>Format</label><select id="exportFormat"><option value="json">JSON</option><option value="csv">CSV</option><option value="xlsx">Excel (.xlsx)</option></select>
+            <label for="exportFormat">Export format</label><select id="exportFormat"><option value="json">JSON</option><option value="csv">CSV</option><option value="xlsx">Excel (.xlsx)</option></select>
             <button type="button" id="exportCatalog">Export Catalog</button>
           </div>
         </div>
       </div>
 
-      <div data-admin-panel="backup" hidden>
+      <div id="admin-panel-backup" role="tabpanel" aria-labelledby="admin-tab-backup" tabindex="0" data-admin-panel="backup" hidden>
+        <header class="admin-panel-heading"><div><h3>Catalog backups</h3><p>Create downloadable snapshots of the catalog and review previously generated backups.</p></div></header>
         <div class="toolbar-grid">
-          <div><label>Backup Format</label><select id="backupFormat"><option value="json">JSON</option><option value="csv">CSV</option><option value="xlsx">Excel (.xlsx)</option></select></div>
-          <div><button type="button" id="createBackup">Generate Backup</button></div>
+          <div><label for="backupFormat">Backup format</label><select id="backupFormat"><option value="json">JSON</option><option value="csv">CSV</option><option value="xlsx">Excel (.xlsx)</option></select></div>
+          <div><button type="button" id="createBackup">Generate catalog backup</button></div>
         </div>
-        <div class="table-wrap">
+        <div class="table-wrap" role="region" aria-label="Generated catalog backups" tabindex="0">
           <table>
             <thead><tr><th>Created</th><th>Format</th><th>Record Counts</th><th>Actions</th></tr></thead>
             <tbody id="backupList"></tbody>
@@ -248,36 +269,39 @@
         </div>
       </div>
 
-      <div data-admin-panel="health" data-super-admin hidden>
+      <div id="admin-panel-health" role="tabpanel" aria-labelledby="admin-tab-health" tabindex="0" data-admin-panel="health" data-super-admin hidden>
+        <header class="admin-panel-heading"><div><h3>System health</h3><p>View the latest backend, database, integration, and backup indicators.</p></div></header>
         <div class="metric-grid" id="healthList"></div>
       </div>
 
-      <div data-admin-panel="users" hidden data-super-admin>
-        <h3>User Management</h3>
+      <div id="admin-panel-users" role="tabpanel" aria-labelledby="admin-tab-users" tabindex="0" data-admin-panel="users" hidden data-super-admin>
+        <header class="admin-panel-heading"><div><h3>User accounts</h3><p>Create accounts, review access, and manage user status and credentials.</p></div></header>
         <p>Search and manage accounts with explicit actions.</p>
-        <div class="grid"><div><label>Search</label><input id="userSearch" placeholder="Name, email, Student ID" /></div><div><label>Role</label><select id="userRoleFilter"><option value="">All roles</option><option value="student">Student</option><option value="regular_admin">Regular Admin</option><option value="super_admin">Super Admin</option></select></div><div><label>Status</label><select id="userStatusFilter"><option value="">All statuses</option><option value="active">Active</option><option value="inactive">Inactive</option><option value="suspended">Suspended</option></select></div></div>
-        <div class="grid"><div><label>Name</label><input id="managedUserName" /></div><div><label>Email</label><input id="managedUserEmail" type="email" /></div><div><label>Student ID (optional)</label><input id="managedUserStudentId" /></div><div><label>Password</label><input id="managedUserPassword" type="password" /></div><div><label>Role</label><select id="managedUserRole"><option value="student">Student</option><option value="regular_admin">Regular Admin</option><option value="super_admin">Super Admin</option></select></div><div><label>Status</label><select id="managedUserStatus"><option value="active">Active</option><option value="inactive">Inactive</option><option value="suspended">Suspended</option></select></div></div>
-        <button type="button" id="createManagedUser">Create User</button>
-        <div class="table-wrap"><table><thead><tr><th>Name / Student ID</th><th>Email</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody id="managedUserList"></tbody></table></div>
+        <div class="grid admin-filter-grid"><div><label for="userSearch">Search accounts</label><input id="userSearch" placeholder="Name, email, Student ID" /></div><div><label for="userRoleFilter">Filter by role</label><select id="userRoleFilter"><option value="">All roles</option><option value="student">Student</option><option value="regular_admin">Regular administrator</option><option value="super_admin">Super administrator</option></select></div><div><label for="userStatusFilter">Filter by status</label><select id="userStatusFilter"><option value="">All statuses</option><option value="active">Active</option><option value="inactive">Inactive</option><option value="suspended">Suspended</option></select></div></div>
+        <h4>Create an account</h4>
+        <div class="grid admin-grid"><div><label for="managedUserName">Full name</label><input id="managedUserName" autocomplete="name" /></div><div><label for="managedUserEmail">Email address</label><input id="managedUserEmail" type="email" autocomplete="email" /></div><div><label for="managedUserStudentId">Student ID (optional)</label><input id="managedUserStudentId" /></div><div><label for="managedUserPassword">Temporary password</label><input id="managedUserPassword" type="password" autocomplete="new-password" /></div><div><label for="managedUserRole">Account role</label><select id="managedUserRole"><option value="student">Student</option><option value="regular_admin">Regular administrator</option><option value="super_admin">Super administrator</option></select></div><div><label for="managedUserStatus">Initial status</label><select id="managedUserStatus"><option value="active">Active</option><option value="inactive">Inactive</option><option value="suspended">Suspended</option></select></div></div>
+        <button type="button" id="createManagedUser">Create account</button>
+        <h4>Existing accounts</h4>
+        <div class="table-wrap" role="region" aria-label="Managed user accounts" tabindex="0"><table><thead><tr><th>Name / Student ID</th><th>Email</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody id="managedUserList"></tbody></table></div>
       </div>
 
-      <div data-admin-panel="requests" hidden data-super-admin>
-        <h3>Super Admin Control Center</h3>
+      <div id="admin-panel-requests" role="tabpanel" aria-labelledby="admin-tab-requests" tabindex="0" data-admin-panel="requests" hidden data-super-admin>
+        <header class="admin-panel-heading"><div><h3>Requests &amp; complaints</h3><p>Review account recovery requests, student reports, and queued communications.</p></div></header>
         <p>Reset links are shown only once after approval; send them only to the account's registered email.</p>
-        <h4>Password Reset Requests</h4><div class="table-wrap"><table><thead><tr><th>Account</th><th>Role</th><th>Status</th><th>Requested</th><th>Reviewed by / at</th><th>Action</th></tr></thead><tbody id="resetRequestList"></tbody></table></div>
-        <h4>Student Complaints / Access Issues</h4><div class="table-wrap"><table><thead><tr><th>Submitter</th><th>Message</th><th>Status</th><th>Assignment</th><th>Last modified</th><th>Details / action</th></tr></thead><tbody id="complaintList"></tbody></table></div>
-        <h4>Communication Log</h4><div class="table-wrap"><table><thead><tr><th>Recipient</th><th>Subject</th><th>Status</th><th>Created</th></tr></thead><tbody id="communicationList"></tbody></table></div>
+        <section class="admin-data-section"><h4>Password-reset requests</h4><p>Approve or reject requests. Approved one-time links are shown once and must go only to the registered address.</p><div class="table-wrap" role="region" aria-label="Password-reset requests" tabindex="0"><table><thead><tr><th>Account</th><th>Role</th><th>Status</th><th>Requested</th><th>Reviewed by / at</th><th>Action</th></tr></thead><tbody id="resetRequestList"></tbody></table></div></section>
+        <section class="admin-data-section"><h4>Student complaints &amp; access issues</h4><p>Review the submitter, assignment history, status, and latest administrator action.</p><div class="table-wrap" role="region" aria-label="Student complaints and access issues" tabindex="0"><table><thead><tr><th>Submitter</th><th>Message</th><th>Status</th><th>Assignment</th><th>Last modified</th><th>Details / action</th></tr></thead><tbody id="complaintList"></tbody></table></div></section>
+        <section class="admin-data-section"><h4>Communication log</h4><p>Check messages queued for delivery and their current status.</p><div class="table-wrap" role="region" aria-label="Communication delivery log" tabindex="0"><table><thead><tr><th>Recipient</th><th>Subject</th><th>Status</th><th>Created</th></tr></thead><tbody id="communicationList"></tbody></table></div></section>
       </div>
     </section>
   </main>
-  <div class="dialog-backdrop" id="userDialog" hidden><section class="card" role="dialog" aria-modal="true" aria-labelledby="userDialogTitle"><button type="button" id="userDialogClose">Close</button><h3 id="userDialogTitle"></h3><div class="user-dialog-body"></div></section></div>
+  <div class="dialog-backdrop" id="userDialog" hidden><section class="card" role="dialog" aria-modal="true" aria-labelledby="userDialogTitle" tabindex="-1"><button type="button" class="secondary" id="userDialogClose" aria-label="Close user dialog">Close</button><h3 id="userDialogTitle"></h3><div class="user-dialog-body" aria-live="polite"></div></section></div>
 
   <dialog id="complaintDetailDialog" class="complaint-detail-dialog" aria-labelledby="complaintDetailTitle">
     <header class="dialog-header"><h2 id="complaintDetailTitle">Complaint details</h2><button type="button" id="complaintDetailClose">Close</button></header>
     <div id="complaintDetailContent" aria-live="polite"></div>
   </dialog>
   <div class="dialog-backdrop" id="adminDialogBackdrop" hidden>
-    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="adminDialogTitle">
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="adminDialogTitle" aria-describedby="adminDialogDescription">
       <form id="adminDialogForm">
         <div class="dialog-header">
           <h2 id="adminDialogTitle">Edit item</h2>

@@ -33,7 +33,25 @@ export function setupDialogs() {
     if (event.target === elements.dialog.backdrop) closeDialog(null);
   });
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !elements.dialog.backdrop.hidden) closeDialog(null);
+    if (elements.dialog.backdrop.hidden) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeDialog(null);
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = [...elements.dialog.form.querySelectorAll('button:not([disabled]):not([hidden]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')]
+      .filter((item) => item.getClientRects().length > 0);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && (document.activeElement === first || !elements.dialog.form.contains(document.activeElement))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   });
 }
 
@@ -59,13 +77,13 @@ export function openFormDialog({ title, description, fields, submitLabel = 'Save
   });
 }
 
-export function openConfirmDialog({ title, description, submitLabel = 'Delete' }) {
+export function openConfirmDialog({ title, description, submitLabel = 'Delete', danger = true }) {
   return openFormDialog({
     title,
     description,
     fields: [],
     submitLabel,
-    danger: true
+    danger
   });
 }
 
