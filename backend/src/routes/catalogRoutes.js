@@ -55,7 +55,7 @@ function trustedStateChange(req) {
   return isAllowedCorsOrigin(req.headers.origin);
 }
 
-export async function handleApi(req, res, url, { resolveCurrentUser = currentUser, sendResetEmail, publicAppUrl } = {}) {
+export async function handleApi(req, res, url, { resolveCurrentUser = currentUser, sendResetEmail, publicAppUrl, dashboardHandler = handleDashboardRequest } = {}) {
   if (!url.pathname.startsWith(env.apiBasePath)) return false;
   const origin = req.headers.origin;
   if (origin && !applyCorsHeaders(req, res)) {
@@ -92,6 +92,10 @@ export async function handleApi(req, res, url, { resolveCurrentUser = currentUse
     if (req.method === 'PUT' && url.pathname === `${env.apiBasePath}/profile`) {
       if (!requirePermission(res, user, Permissions.profileWrite)) return;
       return handleDashboardRequest(req, res, url, user);
+    }
+    if (req.method === 'POST' && [`${env.apiBasePath}/notifications/read`, `${env.apiBasePath}/notifications/read-all`].includes(url.pathname)) {
+      if (!requirePermission(res, user, Permissions.dashboardRead)) return;
+      return await dashboardHandler(req, res, url, user);
     }
     if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/student/complaints`) {
       if (user.role !== 'student' || !requirePermission(res, user, Permissions.studentComplaintCreate)) return;
@@ -171,6 +175,7 @@ export async function handleApi(req, res, url, { resolveCurrentUser = currentUse
   } catch (error) {
     console.error(JSON.stringify({ requestId: req.requestId, event: 'api_error', name: error?.name, code: error?.code, message: String(error?.message || '').replace(/(?:password|token|secret|cookie)=?\S*/ig, '[redacted]') }));
     if (error.message === 'INVALID_JSON') return json(res, 400, { error: 'Invalid JSON payload' });
+    if (error.message === 'PAYLOAD_TOO_LARGE' && url.pathname === `${env.apiBasePath}/notifications/read`) return json(res, 413, { error: 'Request body is too large.', code: 'PAYLOAD_TOO_LARGE' });
     if (error.message === 'PAYLOAD_TOO_LARGE') return json(res, 413, { error: 'Import file is too large (maximum 12 MB).' });
     if (error.message === 'PG_DRIVER_MISSING') return json(res, 500, { error: 'PostgreSQL driver is missing. Install pg.' });
     if (String(error.message || '').startsWith('DB_')) return json(res, 503, { error: databaseDiagnosticMessage(error) });
