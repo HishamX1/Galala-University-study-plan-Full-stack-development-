@@ -2,14 +2,18 @@ import { env } from '../config/env.js';
 import { json, parseBody } from '../middleware/http.js';
 import { validatePassword } from '../services/passwordService.js';
 import {
-  countSuperAdmins, createCommunication, createManagedUser, decidePasswordResetRequest,
-  deleteUser, listCommunications, listComplaints, listPasswordResetRequests,
+  assignComplaint, countSuperAdmins, createCommunication, createManagedUser, decidePasswordResetRequest,
+  deleteUser, getComplaintDetails, listCommunications, listComplaints, listPasswordResetRequests,
   listUsers, resetUserPassword, updateComplaint, updateUser
 } from '../services/authService.js';
 
 const auditActor = (user, req) => ({ ...user, ...(req.requestId ? { requestId: req.requestId } : {}) });
 
-export async function handleAdminSupportRequest(req, res, url, user) {
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export async function handleAdminSupportRequest(req, res, url, user, support = {}) {
+  const getDetails = support.getComplaintDetails || getComplaintDetails;
+  const assign = support.assignComplaint || assignComplaint;
   if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/password-reset-requests`) {
     json(res, 200, { requests: await listPasswordResetRequests() });
     return true;
@@ -22,6 +26,28 @@ export async function handleAdminSupportRequest(req, res, url, user) {
   }
   if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/complaints`) {
     json(res, 200, { complaints: await listComplaints() });
+    return true;
+  }
+  const complaintDetails = url.pathname.match(new RegExp(`^${env.apiBasePath}/admin/complaints/([^/]+)$`));
+  if (req.method === 'GET' && complaintDetails) {
+    if (!uuidPattern.test(complaintDetails[1])) { json(res, 404, { error: 'Complaint not found.' }); return true; }
+    const details = await getDetails(complaintDetails[1]);
+    if (!details) { json(res, 404, { error: 'Complaint not found.' }); return true; }
+    json(res, 200, details);
+    return true;
+  }
+  const assignment = url.pathname.match(new RegExp(`^${env.apiBasePath}/admin/complaints/([^/]+)/assignment$`));
+  if (req.method === 'POST' && assignment) {
+    if (!uuidPattern.test(assignment[1])) { json(res, 404, { error: 'Complaint not found.' }); return true; }
+    const body = await parseBody(req, 4096);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      json(res, 400, { error: 'A valid assignment body is required.' }); return true;
+    }
+    if (body.assigneeId !== null && (typeof body.assigneeId !== 'string' || !uuidPattern.test(body.assigneeId))) {
+      json(res, 400, { error: 'A valid assigneeId or null is required.' }); return true;
+    }
+    const complaint = await assign(assignment[1], body.assigneeId, auditActor(user, req));
+    json(res, 200, { complaint });
     return true;
   }
   if (req.method === 'PUT' && url.pathname.match(new RegExp(`^${env.apiBasePath}/admin/complaints/[^/]+$`))) {

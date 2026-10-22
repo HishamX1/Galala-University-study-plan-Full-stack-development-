@@ -6,9 +6,10 @@ import { countSuperAdmins as countSuperAdminRows, countUsers as countUserRows, d
 import { createRefreshSession, findActiveRefreshSession, findPriorSessionCreatedAt, revokeRefreshSession, revokeUserRefreshSessions, tokenHash } from '../repositories/sessionRepository.js';
 import { countRecentStudentEmailResetTokens, createResetRequest, createResetToken, decideResetRequest, findActiveStudentByEmailForUpdate, findOpenResetRequest, findResetEligibleUser, findUsableResetToken, invalidateActiveResetTokens, listResetRequests, markResetTokenUsed, queueResetNotification } from '../repositories/recoveryRepository.js';
 import { getPasswordResetEmailConfig, sendPasswordResetEmail } from './passwordResetEmailService.js';
-import { createCommunicationRecord, createComplaintRecord, findComplaintForUpdate, listCommunicationRecords, listComplaintRecords, listOpenComplaintNotifications, listOpenResetNotifications, listRecentBackupNotifications, listStudentActivity, listUserNotifications, updateComplaintRecord, userStatusCounts } from '../repositories/notificationRepository.js';
-import { listRecentAuditEvents } from '../repositories/auditRepository.js';
+import { createCommunicationRecord, createComplaintRecord, findActiveAdminAssignee, findAdminName, findComplaintForUpdate, findComplaintRecord, listCommunicationRecords, listComplaintRecords, listOpenComplaintNotifications, listOpenResetNotifications, listRecentBackupNotifications, listStudentActivity, listUserNotifications, updateComplaintAssignment, updateComplaintRecord, userStatusCounts } from '../repositories/notificationRepository.js';
+import { listComplaintAuditEvents, listRecentAuditEvents } from '../repositories/auditRepository.js';
 import { logAdminAction } from './adminOpsService.js';
+import { NotFoundError, ValidationError } from '../utils/errors.js';
 
 // Access tokens are intentionally short-lived.  The refresh session, not the
 // access token, provides the continuous signed-in experience.
@@ -357,6 +358,12 @@ export async function createComplaint(user, message, requestId = null) {
   });
 }
 export async function listComplaints() { return listComplaintRecords({ query }); }
+export async function getComplaintDetails(id) {
+  const complaint = await findComplaintRecord(id, { query });
+  if (!complaint) return null;
+  const { rows: history } = await listComplaintAuditEvents({ query }, id);
+  return { complaint, history };
+}
 export async function updateComplaint(id, status, reply, actorId, actor = null) {
   if (!['open','in_progress','resolved'].includes(status)) throw new Error('Invalid complaint status.');
   return withPostgresClient(async (client) => {
@@ -368,6 +375,37 @@ export async function updateComplaint(id, status, reply, actorId, actor = null) 
       await logAdminAction(client, { action: 'Complaint Updated', entity: 'complaint', targetId: id, actor, category: 'request', oldValues: { status: previous.status }, newValues: { status: updated.status }, description: 'Updated student complaint status or response' });
       await client.query('COMMIT');
       return updated;
+    } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
+  });
+}
+export async function assignComplaint(id, assigneeId, actor) {
+  if (assigneeId !== null && (typeof assigneeId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(assigneeId))) {
+    throw new ValidationError('Invalid assigneeId.');
+  }
+  return withPostgresClient(async (client) => {
+    await client.query('BEGIN');
+    try {
+      const previous = await findComplaintForUpdate(id, client);
+      if (!previous) throw new NotFoundError('Complaint not found.');
+      const previousAssigneeName = previous.assigned_to ? await findAdminName(previous.assigned_to, client) : null;
+      const assignee = assigneeId ? await findActiveAdminAssignee(assigneeId, client) : null;
+      if (assigneeId && !assignee) throw new NotFoundError('Active administrator not found.');
+      if ((previous.assigned_to || null) === (assignee?.id || null)) {
+        const unchanged = await findComplaintRecord(id, client);
+        await client.query('COMMIT');
+        return unchanged;
+      }
+      const updated = await updateComplaintAssignment(id, assignee?.id || null, actor.id, client);
+      const action = !assignee ? 'Complaint Unassigned' : previous.assigned_to ? 'Complaint Reassigned' : 'Complaint Assigned';
+      await logAdminAction(client, {
+        action, entity: 'complaint', targetId: id, actor, category: 'request',
+        oldValues: { assignedTo: previous.assigned_to || null, assignedToName: previousAssigneeName },
+        newValues: { assignedTo: assignee?.id || null, assignedToName: assignee?.name || null, assignedBy: actor.id },
+        description: !assignee ? 'Removed the complaint assignment' : `${action === 'Complaint Assigned' ? 'Assigned' : 'Reassigned'} a complaint to ${assignee.name}`
+      });
+      const result = await findComplaintRecord(id, client);
+      await client.query('COMMIT');
+      return result;
     } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
   });
 }

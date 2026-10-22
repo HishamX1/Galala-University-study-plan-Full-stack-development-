@@ -1,0 +1,11 @@
+# Complaint submitter, assignment, and history visibility
+
+The super-administrator complaint view identifies the authenticated student who submitted each new complaint, its current assignee, the administrator who recorded the current assignment, and the administrator/time of the latest modification. Complaint messages remain available only through the existing super-admin-protected support endpoints and are not copied into audit-event metadata.
+
+The existing `GET /api/admin/complaints` and `PUT /api/admin/complaints/:id` contracts remain available. Additive endpoints provide `GET /api/admin/complaints/:id` with a bounded audit history and `POST /api/admin/complaints/:id/assignment` with `{ "assigneeId": "<active-admin-uuid>" }` or `{ "assigneeId": null }` to unassign. Both endpoints retain the existing `complaints.manage` permission; in the current role map this is super-administrator-only. Student and regular-administrator requests remain denied by backend authorization.
+
+Assignment changes and their audit records use one service-owned PostgreSQL transaction. The audit event records the prior and new assignee IDs/names and derives the actor from the authenticated server context. Repeating the same assignment is a no-op and does not create a duplicate assignment event. Complaint status/reply updates continue to use the existing route and now also persist `last_modified_by`.
+
+Migration `20261022140000_complaint_visibility_and_assignment.sql` adds nullable identity references and indexes. It backfills a submitter only when one student account matches the complaint's stored email case-insensitively and unambiguously. It copies the existing `handled_by` identity into `last_modified_by`, because the current update workflow has written that field for the modifying administrator. It deliberately does not infer a historical assignee from `handled_by`. If old identity cannot be established, the interface reports it as unavailable; it does not fabricate a name. Audit history is available only from events retained since audit logging was introduced.
+
+Apply this migration through the approved migration process before deploying the Part 4 backend/UI changes. No hosted migration or production data operation was performed as part of implementation. PostgreSQL-backed verification uses only the repository's guarded disposable database workflow.

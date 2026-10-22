@@ -48,6 +48,20 @@ export async function listRecentAuditEvents(executor, { actorId = null, limit = 
   );
 }
 
+export async function listComplaintAuditEvents(executor, complaintId, limit = 50) {
+  const boundedLimit = Math.min(Math.max(Number(limit) || 50, 1), 50);
+  return executor.query(
+    `SELECT id, created_at, action, actor_id, actor_role,
+            COALESCE(actor_name, admin_user) AS actor_name,
+            old_values, new_values, description, outcome, request_id
+       FROM admin_audit_logs
+      WHERE entity = 'complaint' AND target_id = $1
+      ORDER BY created_at DESC, id DESC
+      LIMIT ${boundedLimit}`,
+    [String(complaintId)]
+  );
+}
+
 export async function findLatestAuditEvent(executor, actionPrefix) {
   return executor.query(
     'SELECT created_at FROM admin_audit_logs WHERE action ILIKE $1 ORDER BY created_at DESC LIMIT 1',

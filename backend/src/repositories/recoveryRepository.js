@@ -19,8 +19,12 @@ export async function createResetRequest(user, message, executor) {
 }
 
 export async function listResetRequests(executor) {
-  return (await executor.query(`SELECT r.id,r.role,r.status,r.message,r.created_at,r.decided_at,u.name,u.email,u.student_id
-    FROM public.password_reset_requests r JOIN public.app_users u ON u.id=r.user_id ORDER BY r.created_at DESC`)).rows;
+  return (await executor.query(`SELECT r.id,r.role,r.status,r.message,r.created_at,r.decided_at,
+      u.name,u.email,u.student_id,decider.name AS decided_by_name
+    FROM public.password_reset_requests r
+    JOIN public.app_users u ON u.id=r.user_id
+    LEFT JOIN public.app_users decider ON decider.id=r.decided_by
+    ORDER BY r.created_at DESC`)).rows;
 }
 
 export async function findOpenResetRequest(id, executor) {

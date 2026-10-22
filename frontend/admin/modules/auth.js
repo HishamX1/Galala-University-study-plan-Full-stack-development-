@@ -8,13 +8,52 @@ import { cache } from './state.js';
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[char]);
 
 async function loadControlCenter() {
-  const [resetData, complaintData, communicationData] = await Promise.all([request('/admin/password-reset-requests'), request('/admin/complaints'), request('/admin/communications')]);
+  const [resetData, complaintData, communicationData, userData] = await Promise.all([request('/admin/password-reset-requests'), request('/admin/complaints'), request('/admin/communications'), cache.complaintAdmins.length ? Promise.resolve(null) : request('/admin/users')]);
+  if (userData) cache.complaintAdmins = userData.users.filter((item) => ['regular_admin', 'super_admin'].includes(item.role) && item.status === 'active');
   const resets = document.getElementById('resetRequestList');
   const complaints = document.getElementById('complaintList');
   const communications = document.getElementById('communicationList');
-  if (resets) resets.innerHTML = resetData.requests.map((item) => `<tr><td>${escapeHtml(item.name)}<small>${escapeHtml(item.email)}</small></td><td>${escapeHtml(item.role)}</td><td>${escapeHtml(item.status)}</td><td>${escapeHtml(item.created_at)}</td><td>${item.status === 'open' ? `<button data-reset-decision="approve" data-request-id="${item.id}">Approve</button> <button data-reset-decision="reject" data-request-id="${item.id}">Reject</button>` : '-'}</td></tr>`).join('') || '<tr><td colspan="5">No requests.</td></tr>';
-  if (complaints) complaints.innerHTML = complaintData.complaints.map((item) => `<tr><td>${escapeHtml(item.student_id || '-')}<small>${escapeHtml(item.email)}</small></td><td>${escapeHtml(item.message)}</td><td>${escapeHtml(item.status)}</td><td><button data-complaint-id="${item.id}">Update</button></td></tr>`).join('') || '<tr><td colspan="4">No complaints.</td></tr>';
+  if (resets) resets.innerHTML = resetData.requests.map((item) => `<tr data-reset-request-row="${escapeHtml(item.id)}"><td>${escapeHtml(item.name)}<small>${escapeHtml(item.email)} · ${escapeHtml(item.student_id || 'Student ID not recorded')}</small></td><td>${escapeHtml(item.role)}</td><td>${escapeHtml(item.status)}</td><td>${escapeHtml(item.created_at)}</td><td>${item.decided_at ? `${escapeHtml(item.decided_by_name || 'Historical administrator unavailable')}<small>${escapeHtml(item.decided_at)}</small>` : 'Awaiting review'}</td><td>${item.status === 'open' ? `<button data-reset-decision="approve" data-request-id="${escapeHtml(item.id)}">Approve</button> <button data-reset-decision="reject" data-request-id="${escapeHtml(item.id)}">Reject</button>` : '-'}</td></tr>`).join('') || '<tr><td colspan="6">No requests.</td></tr>';
+  if (complaints) complaints.innerHTML = complaintData.complaints.map((item) => {
+    const submitter = item.submitted_name || item.current_submitter_name || 'Historical identity unavailable';
+    const modifier = item.last_modified_by_name || (new Date(item.updated_at).getTime() > new Date(item.created_at).getTime() ? 'Historical administrator unavailable' : 'Not modified');
+    const assigneeOptions = [`<option value="">Unassigned</option>`, ...cache.complaintAdmins.map((admin) => `<option value="${escapeHtml(admin.id)}" ${admin.id === item.assigned_to ? 'selected' : ''}>${escapeHtml(admin.name)} (${escapeHtml(admin.role.replace('_', ' '))})</option>`)].join('');
+    return `<tr data-complaint-row="${escapeHtml(item.id)}"><td>${escapeHtml(submitter)}<small>${escapeHtml(item.student_id || 'Student ID not recorded')} · ${escapeHtml(item.email)}</small><small>Submitted ${escapeHtml(item.created_at)}</small></td><td>${escapeHtml(item.message)}</td><td>${escapeHtml(item.status)}</td><td><div>${item.assigned_to_name ? `${escapeHtml(item.assigned_to_name)} (assigned by ${escapeHtml(item.assigned_by_name || 'Historical administrator unavailable')})` : 'Unassigned'}</div><small>${item.assigned_at ? `Assignment updated ${escapeHtml(item.assigned_at)}` : 'No assignment history'}</small><select aria-label="Assign complaint ${escapeHtml(item.id)}" data-complaint-assignee="${escapeHtml(item.id)}">${assigneeOptions}</select><button type="button" data-complaint-assign="${escapeHtml(item.id)}">Save assignment</button></td><td>${escapeHtml(modifier)}<small>${escapeHtml(item.updated_at)}</small></td><td><button type="button" data-complaint-view="${escapeHtml(item.id)}">View history</button><button type="button" data-complaint-update="${escapeHtml(item.id)}">Update status / reply</button></td></tr>`;
+  }).join('') || '<tr><td colspan="6">No complaints.</td></tr>';
   if (communications) communications.innerHTML = communicationData.communications.map((item) => `<tr><td>${escapeHtml(item.recipient_name)}<small>${escapeHtml(item.recipient_email)}</small></td><td>${escapeHtml(item.subject)}</td><td>${escapeHtml(item.status)}</td><td>${escapeHtml(item.created_at)}</td></tr>`).join('') || '<tr><td colspan="4">No queued communications.</td></tr>';
+}
+
+async function showComplaintDetails(id) {
+  const dialog = document.getElementById('complaintDetailDialog');
+  const content = document.getElementById('complaintDetailContent');
+  const { complaint, history } = await request(`/admin/complaints/${encodeURIComponent(id)}`);
+  const submitter = complaint.submitted_name || complaint.current_submitter_name || 'Historical identity unavailable';
+  const modifier = complaint.last_modified_by_name || (new Date(complaint.updated_at).getTime() > new Date(complaint.created_at).getTime() ? 'Historical administrator unavailable' : 'Not modified');
+  const events = history.length ? history.map((event) => `<li><strong>${escapeHtml(event.action)}</strong><br>${escapeHtml(event.description || 'No historical summary recorded')}<br><span>${escapeHtml(event.actor_name || 'Historical actor unavailable')}${event.actor_role ? ` (${escapeHtml(event.actor_role.replace('_', ' '))})` : ''} · ${escapeHtml(event.created_at)}</span></li>`).join('') : '<li>No retained activity history. Earlier changes may predate audit logging.</li>';
+  content.innerHTML = `<dl><dt>Submitter</dt><dd>${escapeHtml(submitter)} · ${escapeHtml(complaint.student_id || 'Student ID not recorded')} · ${escapeHtml(complaint.email)}</dd><dt>Submitted</dt><dd>${escapeHtml(complaint.created_at)}</dd><dt>Status</dt><dd>${escapeHtml(complaint.status)}</dd><dt>Last modified by</dt><dd>${escapeHtml(modifier)} · ${escapeHtml(complaint.updated_at)}</dd><dt>Assigned to</dt><dd>${escapeHtml(complaint.assigned_to_name || 'Unassigned')}</dd><dt>Assignment recorded by</dt><dd>${escapeHtml(complaint.assigned_by_name || (complaint.assigned_at ? 'Historical administrator unavailable' : 'Not assigned'))}${complaint.assigned_at ? ` · ${escapeHtml(complaint.assigned_at)}` : ''}</dd><dt>Message</dt><dd class="complaint-message">${escapeHtml(complaint.message)}</dd><dt>Reply</dt><dd class="complaint-message">${escapeHtml(complaint.reply || 'No reply recorded')}</dd></dl><h3>Activity history</h3><ol class="complaint-history">${events}</ol>`;
+  if (!dialog.open) dialog.showModal();
+}
+
+async function openRequestedAdminDestination(role) {
+  const params = new URLSearchParams(window.location.search);
+  const tab = params.get('tab');
+  if (!tab && !params.has('complaint')) return;
+  if (tab === 'requests' && role !== 'super_admin') {
+    setMessage('error', 'You do not have permission to view system-wide requests and complaints.');
+    return;
+  }
+  const allowed = new Set(['dashboard', 'catalog', 'audit', 'recycle', 'transfer', 'backup', 'health', 'users', 'requests']);
+  if (tab && allowed.has(tab)) document.querySelector(`[data-admin-tab="${tab}"]`)?.click();
+  const complaintId = params.get('complaint');
+  if (complaintId && tab === 'requests' && role === 'super_admin') {
+    await showComplaintDetails(complaintId);
+  }
+  const resetRequestId = params.get('resetRequest');
+  if (resetRequestId && tab === 'requests' && role === 'super_admin') {
+    const row = [...document.querySelectorAll('[data-reset-request-row]')].find((item) => item.dataset.resetRequestRow === resetRequestId);
+    row?.classList.add('complaint-row-highlight');
+    row?.scrollIntoView({ block: 'center' });
+  }
 }
 
 export function setupLogin() {
@@ -56,6 +95,7 @@ export function setupLogin() {
 
   const renderUsers = async () => {
     const { users } = await request('/admin/users');
+    cache.complaintAdmins = users.filter((item) => ['regular_admin', 'super_admin'].includes(item.role) && item.status === 'active');
     const list = document.getElementById('managedUserList');
     const search = String(document.getElementById('userSearch')?.value || '').toLowerCase();
     const role = document.getElementById('userRoleFilter')?.value || '';
@@ -92,6 +132,7 @@ export function setupLogin() {
     document.querySelector('[data-user-name]')?.replaceChildren(document.createTextNode(`${user.name} (${user.role.replace('_', ' ')})`));
     document.querySelectorAll('[data-super-admin]').forEach((item) => { item.hidden = user.role !== 'super_admin'; });
     await loadRelations(); await loadAdminOps(); if (user.role === 'super_admin') { await renderUsers(); await loadControlCenter(); }
+    await openRequestedAdminDestination(user.role);
   }).catch(() => { window.location.assign('../admin-login.html'); });
 
   document.getElementById('resetRequestList')?.addEventListener('click', async (event) => {
@@ -99,9 +140,25 @@ export function setupLogin() {
     try { const { request: reset } = await request(`/admin/password-reset-requests/${button.dataset.requestId}/${button.dataset.resetDecision}`, { method: 'POST', body: JSON.stringify({}) }); if (reset.resetLink) prompt('Copy this one-time reset link and send it only to the registered email:', `${location.origin}${reset.resetLink}`); setMessage('success', 'Request updated.'); await loadControlCenter(); } catch (error) { setMessage('error', error.message); }
   });
   document.getElementById('complaintList')?.addEventListener('click', async (event) => {
-    const button = event.target.closest('[data-complaint-id]'); if (!button) return;
-    const reply = prompt('Reply to the student (saved for registered-email delivery):'); if (reply === null) return;
-    const status = prompt('Status: open, in_progress, or resolved', 'in_progress'); if (!status) return;
-    try { await request(`/admin/complaints/${button.dataset.complaintId}`, { method: 'PUT', body: JSON.stringify({ status, reply }) }); setMessage('success', 'Complaint updated.'); await loadControlCenter(); } catch (error) { setMessage('error', error.message); }
+    const view = event.target.closest('[data-complaint-view]');
+    const assign = event.target.closest('[data-complaint-assign]');
+    const update = event.target.closest('[data-complaint-update]');
+    if (!view && !assign && !update) return;
+    const id = view?.dataset.complaintView || assign?.dataset.complaintAssign || update?.dataset.complaintUpdate;
+    try {
+      if (view) { await showComplaintDetails(id); return; }
+      if (assign) {
+        const assigneeId = document.querySelector(`[data-complaint-assignee="${id}"]`)?.value || null;
+        await request(`/admin/complaints/${id}/assignment`, { method: 'POST', body: JSON.stringify({ assigneeId }) });
+        setMessage('success', 'Complaint assignment updated.');
+        await loadControlCenter();
+        return;
+      }
+      const reply = prompt('Reply to the student (saved for registered-email delivery):'); if (reply === null) return;
+      const status = prompt('Status: open, in_progress, or resolved', 'in_progress'); if (!status) return;
+      await request(`/admin/complaints/${id}`, { method: 'PUT', body: JSON.stringify({ status, reply }) });
+      setMessage('success', 'Complaint updated.'); await loadControlCenter();
+    } catch (error) { setMessage('error', error.message); }
   });
+  document.getElementById('complaintDetailClose')?.addEventListener('click', () => document.getElementById('complaintDetailDialog')?.close());
 }
