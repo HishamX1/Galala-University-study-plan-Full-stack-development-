@@ -6,7 +6,7 @@ import { countSuperAdmins as countSuperAdminRows, countUsers as countUserRows, d
 import { createRefreshSession, findActiveRefreshSession, findPriorSessionCreatedAt, revokeRefreshSession, revokeUserRefreshSessions, tokenHash } from '../repositories/sessionRepository.js';
 import { countRecentStudentEmailResetTokens, createResetRequest, createResetToken, decideResetRequest, findActiveStudentByEmailForUpdate, findOpenResetRequest, findResetEligibleUser, findUsableResetToken, invalidateActiveResetTokens, listResetRequests, markResetTokenUsed, queueResetNotification } from '../repositories/recoveryRepository.js';
 import { getPasswordResetEmailConfig, sendPasswordResetEmail } from './passwordResetEmailService.js';
-import { createCommunicationRecord, createComplaintRecord, findActiveAdminAssignee, findAdminName, findComplaintForUpdate, findComplaintRecord, listCommunicationRecords, listComplaintRecords, listOpenComplaintNotifications, listOpenResetNotifications, listRecentBackupNotifications, listStudentActivity, listUserNotifications, updateComplaintAssignment, updateComplaintRecord, userStatusCounts } from '../repositories/notificationRepository.js';
+import { createCommunicationRecord, createComplaintRecord, findActiveAdminAssignee, findAdminName, findComplaintForUpdate, findComplaintRecord, listCommunicationRecords, listComplaintRecords, listOpenComplaintNotifications, listOpenResetNotifications, listRecentBackupNotifications, listStudentActivity, listUserNotifications, markNotificationRead as saveNotificationRead, markNotificationsRead as saveNotificationsRead, updateComplaintAssignment, updateComplaintRecord, userStatusCounts } from '../repositories/notificationRepository.js';
 import { listComplaintAuditEvents, listRecentAuditEvents } from '../repositories/auditRepository.js';
 import { logAdminAction } from './adminOpsService.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
@@ -197,13 +197,34 @@ export async function getDashboardData(user) {
     findPriorSessionCreatedAt(user.id, { query }),
     listUserNotifications(user.id, { query }),
     user.role === 'student' ? listStudentActivity(user.id, { query }) : listRecentAuditEvents({ query }, { actorId: user.role === 'regular_admin' ? user.id : null, limit: 6 }).then((result) => result.rows),
-    user.role === 'super_admin' ? listOpenResetNotifications({ query }) : Promise.resolve([]),
-    user.role === 'super_admin' ? listOpenComplaintNotifications({ query }) : Promise.resolve([]),
-    user.role === 'super_admin' ? listRecentBackupNotifications({ query }) : Promise.resolve([])
+    user.role === 'super_admin' ? listOpenResetNotifications(user.id, { query }) : Promise.resolve([]),
+    user.role === 'super_admin' ? listOpenComplaintNotifications(user.id, { query }) : Promise.resolve([]),
+    user.role === 'super_admin' ? listRecentBackupNotifications(user.id, { query }) : Promise.resolve([])
   ]);
-  const notifications = [...notices.map((item) => ({ ...item, read: false, target: null })), ...resetRequests.map((item) => ({ id: `reset-${item.id}`, title: 'Password reset request', description: 'A password-reset request requires review.', timestamp: item.created_at, category: 'account', read: false, target: '/admin/index.html' })), ...complaints.map((item) => ({ id: `complaint-${item.id}`, title: 'Student complaint', description: 'A student complaint requires review.', timestamp: item.created_at, category: 'request', read: false, target: '/admin/index.html' })), ...backups.slice(0, 1).map((item) => ({ id: `backup-${item.id}`, title: 'Backup available', description: 'A system backup was generated.', timestamp: item.created_at, category: 'system', read: true, target: '/admin/index.html' }))].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 10);
+  const notifications = [...notices.map((item) => ({ ...item, read: Boolean(item.read), target: null })), ...resetRequests.map((item) => ({ id: `reset-${item.id}`, notification_key: `password_reset_request:${item.id}`, title: 'Password reset request', description: 'A password-reset request requires review.', timestamp: item.created_at, category: 'account', read: Boolean(item.read), target: '/admin/index.html' })), ...complaints.map((item) => ({ id: `complaint-${item.id}`, notification_key: `complaint:${item.id}`, title: 'Student complaint', description: 'A student complaint requires review.', timestamp: item.created_at, category: 'request', read: Boolean(item.read), target: '/admin/index.html' })), ...backups.slice(0, 1).map((item) => ({ id: `backup-${item.id}`, notification_key: `backup:${item.id}`, title: 'Backup available', description: 'A system backup was generated.', timestamp: item.created_at, category: 'system', read: Boolean(item.read), target: '/admin/index.html' }))].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 10);
   const userCounts = user.role === 'super_admin' ? await userStatusCounts({ query }) : null;
   return { profile: { ...publicUser(user), avatarData: user.avatar_data || null, lastLogin: lastSession?.created_at || null, passwordChangedAt: user.password_changed_at || null }, notifications, recentActivity: activity, userCounts, studyProgress: user.role === 'student' ? { available: false, message: 'Academic progress will appear once university academic records are connected.' } : null };
+}
+
+const NOTIFICATION_KEY_PATTERN = /^(communication|password_reset_request|complaint):([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$|^(backup):([1-9][0-9]{0,17})$/i;
+function parseNotificationKey(key) {
+  const match = NOTIFICATION_KEY_PATTERN.exec(String(key || ''));
+  if (!match) throw new ValidationError('Invalid notification key.');
+  return { type: match[1] || match[3], sourceId: match[2] || match[4] };
+}
+
+export async function markNotificationRead(user, key) {
+  const { type, sourceId } = parseNotificationKey(key);
+  const saved = await saveNotificationRead(user.id, user.role, type, sourceId, { query });
+  if (!saved) throw new NotFoundError('Notification not found.');
+  return { id: key, read: true };
+}
+
+export async function markAllDashboardNotificationsRead(user) {
+  const dashboard = await getDashboardData(user);
+  const keys = dashboard.notifications.filter((item) => !item.read).map((item) => item.notification_key).filter(Boolean);
+  const notificationKeys = await saveNotificationsRead(user.id, user.role, keys, { query });
+  return { notificationKeys, updatedCount: notificationKeys.length };
 }
 
 export async function deleteUser(id, actor = null) {

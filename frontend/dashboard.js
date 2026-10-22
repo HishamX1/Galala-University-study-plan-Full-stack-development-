@@ -7,6 +7,7 @@ const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, c => ({ '&'
 const date = value => value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : 'Not available';
 let user = await restoreSession();
 if (!user) location.replace('./index.html');
+let dashboardData;
 
 async function api(path, options = {}) {
   let lastError;
@@ -23,10 +24,11 @@ function actions(role) {
 function card(title, body, extra = '') { return `<section class="dash-card ${extra}"><h2>${title}</h2>${body}</section>`; }
 function metrics(counts = {}) { return `<div class="metric-grid">${[['Faculties', counts.faculties],['Programs', counts.programs],['Courses', counts.courses],['Program courses', counts.programCourses],['Relationships', counts.relationships],['Hidden relations', counts.hiddenRelationships]].map(([k,v]) => `<div><strong>${v ?? 0}</strong><span>${k}</span></div>`).join('')}</div>`; }
 function render(data) {
+  dashboardData = data;
   user = data.profile; const welcome = user.role === 'student' ? `Welcome back, ${escapeHtml(user.name)}.` : user.role === 'regular_admin' ? `Welcome back, ${escapeHtml(user.name)}. Here's today's academic administration overview.` : `Welcome back, ${escapeHtml(user.name)}. Here's your system overview.`;
   document.getElementById('identity-header').innerHTML = `${avatar(user)}<div><p class="role-label">${labels[user.role]}</p><h1>${escapeHtml(user.name)}</h1><p>@${escapeHtml(user.username || 'username')} · <span class="status">${escapeHtml(user.status)}</span></p>${user.studentId ? `<p>Student ID: ${escapeHtml(user.studentId)}</p>` : ''}</div><button id="edit-profile" class="button secondary">Profile</button>`;
   const unread = data.notifications.filter(n => !n.read).length; document.getElementById('notification-count').hidden = !unread; document.getElementById('notification-count').textContent = unread;
-  const noticeList = data.notifications.length ? `<ul class="activity-list">${data.notifications.map(n => `<li><strong>${escapeHtml(n.title)}</strong><span>${escapeHtml(n.description)}</span><time>${date(n.timestamp)}</time></li>`).join('')}</ul>` : '<p class="empty">No stored notifications yet.</p>';
+  const noticeList = data.notifications.length ? `<div id="notification-feedback" class="notification-feedback" role="status" aria-live="polite" tabindex="-1"></div>${unread ? '<button class="button secondary mark-all-notifications" data-notification-action="all">Mark all shown as read</button>' : ''}<ul class="activity-list">${data.notifications.map(n => `<li class="notification-item${n.read ? '' : ' unread'}" ${n.notification_key ? `data-notification-key="${escapeHtml(n.notification_key)}"` : ''}><strong>${escapeHtml(n.title)}</strong><span>${escapeHtml(n.description)}</span><time>${date(n.timestamp)}</time><span class="notification-status">${n.read ? 'Read' : 'Unread'}</span>${!n.read && n.notification_key ? `<button class="button secondary mark-notification-read" data-notification-action="one" data-notification-key="${escapeHtml(n.notification_key)}">Mark as read</button>` : ''}</li>`).join('')}</ul>` : '<p class="empty">No stored notifications yet.</p>';
   const recent = data.recentActivity.length ? `<ul class="activity-list">${data.recentActivity.map(a => `<li><strong>${escapeHtml(a.action)}</strong><span>${escapeHtml(a.description || '')}</span><time>${date(a.created_at)}</time></li>`).join('')}</ul>` : '<p class="empty">No recorded activity yet.</p>';
   const quick = `<div class="quick-grid">${actions(user.role).map(([label, href]) => `<a href="${href}" class="quick-action">${label}<span aria-hidden="true">→</span></a>`).join('')}</div>`;
   const security = `<dl class="security-list"><div><dt>Email</dt><dd>${escapeHtml(user.email)}</dd></div><div><dt>Username</dt><dd>@${escapeHtml(user.username || '')}</dd></div><div><dt>Account status</dt><dd>${escapeHtml(user.status)}</dd></div><div><dt>Last login</dt><dd>${date(user.lastLogin)}</dd></div><div><dt>Password last changed</dt><dd>${date(user.passwordChangedAt)}</dd></div></dl><div class="inline-actions"><a class="button secondary" href="./password-reset-request.html">Change Password</a><button id="security-sign-out" class="button danger">Sign Out</button></div>`;
@@ -36,6 +38,38 @@ function render(data) {
   document.getElementById('dashboard-content').innerHTML = `<section class="welcome"><p class="role-label">Dashboard</p><h2>${welcome}</h2></section>${overview}${card('Quick Access', quick)}${progress}${card('Notifications', `<div id="notifications">${noticeList}</div>`)}${card('Recent Activity', recent)}${system}${card('Account & Security', security)}`;
   document.getElementById('edit-profile').addEventListener('click', openProfile); document.getElementById('security-sign-out').addEventListener('click', logout); document.getElementById('notification-button').addEventListener('click', () => document.getElementById('notifications').scrollIntoView({ behavior: 'smooth' }));
 }
+function applyReadState(keys) {
+  const readKeys = new Set(keys);
+  for (const notification of dashboardData.notifications) if (readKeys.has(notification.notification_key)) notification.read = true;
+  for (const row of document.querySelectorAll('#notifications li[data-notification-key]')) {
+    if (!readKeys.has(row.dataset.notificationKey)) continue;
+    row.classList.remove('unread');
+    const status = row.querySelector('.notification-status'); if (status) status.textContent = 'Read';
+    row.querySelector('[data-notification-action="one"]')?.remove();
+  }
+  const unread = dashboardData.notifications.filter(notification => !notification.read).length;
+  const badge = document.getElementById('notification-count'); badge.hidden = !unread; badge.textContent = unread;
+  if (!unread) document.querySelector('[data-notification-action="all"]')?.remove();
+}
+document.getElementById('dashboard-content').addEventListener('click', async event => {
+  const button = event.target.closest('[data-notification-action]'); if (!button) return;
+  const action = button.dataset.notificationAction; button.disabled = true;
+  const feedback = document.getElementById('notification-feedback'); if (feedback) feedback.textContent = '';
+  try {
+    if (action === 'one') {
+      const result = await api('/notifications/read', { method: 'POST', body: JSON.stringify({ notificationKey: button.dataset.notificationKey }) });
+      applyReadState([result.notification.id]);
+      const status = document.getElementById('notification-feedback'); status.textContent = 'Notification marked as read.'; status.focus();
+    } else {
+      const result = await api('/notifications/read-all', { method: 'POST', body: '{}' });
+      applyReadState(result.notificationKeys);
+      const status = document.getElementById('notification-feedback'); status.textContent = `${result.updatedCount} notification${result.updatedCount === 1 ? '' : 's'} marked as read.`; status.focus();
+    }
+  } catch (error) {
+    button.disabled = false;
+    const status = document.getElementById('notification-feedback'); if (status) status.textContent = `${error.message} Your unread notification state has not been changed on this screen.`;
+  }
+});
 function openProfile() { const form = document.getElementById('profile-form'); form.name.value = user.name; form.username.value = user.username || ''; document.getElementById('avatar-options').innerHTML = avatars.map((icon, i) => `<label class="avatar-choice"><input type="radio" name="avatarKey" value="avatar-${i+1}" ${user.avatarKey === `avatar-${i+1}` ? 'checked' : ''}><span>${icon}</span><b>${i < 3 ? 'Masc.' : 'Fem.'} ${i % 3 + 1}</b></label>`).join(''); document.getElementById('profile-error').textContent = ''; document.getElementById('profile-dialog').showModal(); }
 document.getElementById('profile-form').addEventListener('submit', async event => { event.preventDefault(); const form = event.currentTarget; try { const payload = { name: form.name.value, username: form.username.value, avatarKey: new FormData(form).get('avatarKey') }; const file = document.getElementById('avatar-upload').files[0]; if (file) { if (file.size > 700 * 1024) throw new Error('Custom avatar must be smaller than 700 KB.'); payload.avatarData = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(file); }); } const response = await api('/profile', { method: 'PUT', body: JSON.stringify(payload) }); user = response.user; document.getElementById('profile-dialog').close(); render(await api('/dashboard')); } catch (error) { document.getElementById('profile-error').textContent = error.message; } });
 document.getElementById('close-profile').addEventListener('click', () => document.getElementById('profile-dialog').close()); document.getElementById('cancel-profile').addEventListener('click', () => document.getElementById('profile-dialog').close());
