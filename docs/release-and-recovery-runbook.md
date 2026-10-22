@@ -22,7 +22,7 @@ This runbook covers the root application and ordered Supabase migrations. It doe
 
 ## Incident triage and recovery
 
-1. Record incident time, deployed commit, request/correlation IDs, affected workflow, and sanitized error class. Check Render/Netlify/Supabase provider status and logs through authorized dashboards; do not paste secrets or personal data into issue reports.
+1. Record incident time, deployed commit, request/correlation IDs, affected workflow, and sanitized error class. Check Render/Vercel/Supabase provider status and logs through authorized dashboards; do not paste secrets or personal data into issue reports. Netlify configuration is retained legacy material, not the active frontend host.
 2. Stop repeated or destructive retries. Do not edit schema or production rows ad hoc. Identify whether the failure is application, configuration, migration, provider availability, or data integrity related.
 3. If the application release is the cause, use the hosting provider's approved rollback to the last known-good application version only after confirming compatibility with the current database schema. Do not automatically reverse a migration; the schema may be ahead of the application and migrations have no guaranteed down scripts.
 4. The application's admin backup feature stores catalog snapshots in `admin_backup_history`; it is not a whole-database backup and does not cover authentication/session, recovery, communications, or all operational data. Do not treat it as a complete disaster-recovery copy.

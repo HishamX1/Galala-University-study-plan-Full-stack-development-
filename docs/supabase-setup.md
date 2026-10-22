@@ -55,7 +55,7 @@ The seed loads catalog fixtures; it is not a production-data repair or migration
 DATABASE_URL=
 PG_SSL=true
 API_BASE_PATH=/api
-CORS_ORIGIN=https://your-netlify-site.netlify.app
+CORS_ORIGIN=https://your-project.vercel.app
 ```
 
 ## Verification
