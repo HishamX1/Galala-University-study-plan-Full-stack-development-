@@ -2,27 +2,78 @@ import { getWorkingApiBase, request, updateConfiguredApiBase } from './apiClient
 import { elements, setMessage, withButtonBusy } from './adminDom.js';
 import { openConfirmDialog, openFormDialog } from './dialogs.js';
 import { loadRelations } from './dataLoader.js';
-import { loadAdminOps } from './adminOps.js';
+import { loadAdminOps, loadAdminSection } from './adminOps.js';
 import { signOut } from '../../shared/session.js';
 import { activateAdminTab, resolveAdminTab } from '../../shared/adminNavigation.js';
 import { cache } from './state.js';
 
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[char]);
 
-async function loadControlCenter() {
-  const [resetData, complaintData, communicationData, userData] = await Promise.all([request('/admin/password-reset-requests'), request('/admin/complaints'), request('/admin/communications'), cache.complaintAdmins.length ? Promise.resolve(null) : request('/admin/users')]);
+const SUPPORT_PAGE_SIZE = 50;
+let controlCenterLoaded = false;
+let controlCenterRequest = null;
+function renderSupportPage(kind, records, page) {
+  const list = document.getElementById(kind === 'complaints' ? 'complaintList' : 'communicationList');
+  if (!list) return;
+  if (kind === 'complaints') {
+    list.innerHTML = records.map((item) => {
+      const submitter = item.submitted_name || item.current_submitter_name || 'Historical identity unavailable';
+      const modifier = item.last_modified_by_name || (new Date(item.updated_at).getTime() > new Date(item.created_at).getTime() ? 'Historical administrator unavailable' : 'Not modified');
+      const assigneeOptions = [`<option value="">Unassigned</option>`, ...cache.complaintAdmins.map((admin) => `<option value="${escapeHtml(admin.id)}" ${admin.id === item.assigned_to ? 'selected' : ''}>${escapeHtml(admin.name)} (${escapeHtml(admin.role.replace('_', ' '))})</option>`)].join('');
+      return `<tr data-complaint-row="${escapeHtml(item.id)}"><td>${escapeHtml(submitter)}<small>${escapeHtml(item.student_id || 'Student ID not recorded')} · ${escapeHtml(item.email)}</small><small>Submitted ${escapeHtml(item.created_at)}</small></td><td>${escapeHtml(item.message)}</td><td>${escapeHtml(item.status)}</td><td><div>${item.assigned_to_name ? `${escapeHtml(item.assigned_to_name)} (assigned by ${escapeHtml(item.assigned_by_name || 'Historical administrator unavailable')})` : 'Unassigned'}</div><small>${item.assigned_at ? `Assignment updated ${escapeHtml(item.assigned_at)}` : 'No assignment history'}</small><select aria-label="Select an administrator for complaint from ${escapeHtml(submitter)}" data-complaint-assignee="${escapeHtml(item.id)}">${assigneeOptions}</select><button type="button" data-complaint-assign="${escapeHtml(item.id)}">Update assignment</button></td><td>${escapeHtml(modifier)}<small>${escapeHtml(item.updated_at)}</small></td><td><button type="button" data-complaint-view="${escapeHtml(item.id)}">View history</button><button type="button" data-complaint-update="${escapeHtml(item.id)}">Update status / reply</button></td></tr>`;
+    }).join('') || '<tr><td colspan="6">No complaints.</td></tr>';
+  } else {
+    list.innerHTML = records.map((item) => `<tr><td>${escapeHtml(item.recipient_name)}<small>${escapeHtml(item.recipient_email)}</small></td><td>${escapeHtml(item.subject)}</td><td>${escapeHtml(item.status)}</td><td>${escapeHtml(item.created_at)}</td></tr>`).join('') || '<tr><td colspan="4">No communications.</td></tr>';
+  }
+  const nav = document.getElementById(`${kind}Pagination`);
+  if (nav) {
+    const start = page.total ? page.offset + 1 : 0;
+    const end = Math.min(page.offset + page.limit, page.total);
+    nav.innerHTML = `<button type="button" data-support-page="${kind}" data-direction="previous" ${page.offset === 0 ? 'disabled' : ''}>Previous</button><span>Showing ${start}–${end} of ${page.total}</span><button type="button" data-support-page="${kind}" data-direction="next" ${end >= page.total ? 'disabled' : ''}>Next</button>`;
+  }
+}
+
+async function loadSupportPage(kind, pageIndex = cache.supportPages[kind]) {
+  const page = Math.max(0, Number(pageIndex) || 0);
+  const requestVersion = ++cache.supportPageRequests[kind];
+  const endpoint = kind === 'complaints' ? '/admin/complaints' : '/admin/communications';
+  const data = await request(`${endpoint}?limit=${SUPPORT_PAGE_SIZE}&offset=${page * SUPPORT_PAGE_SIZE}`);
+  if (requestVersion !== cache.supportPageRequests[kind]) return;
+  cache.supportPages[kind] = page;
+  cache.supportPageData[kind] = data.page;
+  renderSupportPage(kind, data[kind], data.page);
+}
+
+async function renderControlCenter(adminUsersPromise = null) {
+  const userDataPromise = adminUsersPromise || (cache.complaintAdmins.length ? Promise.resolve(null) : request('/admin/users'));
+  const complaintRequestVersion = ++cache.supportPageRequests.complaints;
+  const communicationRequestVersion = ++cache.supportPageRequests.communications;
+  const [resetData, complaintData, communicationData, userData] = await Promise.all([request('/admin/password-reset-requests'), request(`/admin/complaints?limit=${SUPPORT_PAGE_SIZE}&offset=${cache.supportPages.complaints * SUPPORT_PAGE_SIZE}`), request(`/admin/communications?limit=${SUPPORT_PAGE_SIZE}&offset=${cache.supportPages.communications * SUPPORT_PAGE_SIZE}`), userDataPromise]);
   if (userData) cache.complaintAdmins = userData.users.filter((item) => ['regular_admin', 'super_admin'].includes(item.role) && item.status === 'active');
   const resets = document.getElementById('resetRequestList');
   const complaints = document.getElementById('complaintList');
   const communications = document.getElementById('communicationList');
   if (resets) resets.innerHTML = resetData.requests.map((item) => `<tr data-reset-request-row="${escapeHtml(item.id)}"><td>${escapeHtml(item.name)}<small>${escapeHtml(item.email)} · ${escapeHtml(item.student_id || 'Student ID not recorded')}</small></td><td>${escapeHtml(item.role)}</td><td>${escapeHtml(item.status)}</td><td>${escapeHtml(item.created_at)}</td><td>${item.decided_at ? `${escapeHtml(item.decided_by_name || 'Historical administrator unavailable')}<small>${escapeHtml(item.decided_at)}</small>` : 'Awaiting review'}</td><td>${item.status === 'open' ? `<button data-reset-decision="approve" data-request-id="${escapeHtml(item.id)}">Approve</button> <button data-reset-decision="reject" data-request-id="${escapeHtml(item.id)}">Reject</button>` : '-'}</td></tr>`).join('') || '<tr><td colspan="6">No requests.</td></tr>';
-  if (complaints) complaints.innerHTML = complaintData.complaints.map((item) => {
-    const submitter = item.submitted_name || item.current_submitter_name || 'Historical identity unavailable';
-    const modifier = item.last_modified_by_name || (new Date(item.updated_at).getTime() > new Date(item.created_at).getTime() ? 'Historical administrator unavailable' : 'Not modified');
-    const assigneeOptions = [`<option value="">Unassigned</option>`, ...cache.complaintAdmins.map((admin) => `<option value="${escapeHtml(admin.id)}" ${admin.id === item.assigned_to ? 'selected' : ''}>${escapeHtml(admin.name)} (${escapeHtml(admin.role.replace('_', ' '))})</option>`)].join('');
-    return `<tr data-complaint-row="${escapeHtml(item.id)}"><td>${escapeHtml(submitter)}<small>${escapeHtml(item.student_id || 'Student ID not recorded')} · ${escapeHtml(item.email)}</small><small>Submitted ${escapeHtml(item.created_at)}</small></td><td>${escapeHtml(item.message)}</td><td>${escapeHtml(item.status)}</td><td><div>${item.assigned_to_name ? `${escapeHtml(item.assigned_to_name)} (assigned by ${escapeHtml(item.assigned_by_name || 'Historical administrator unavailable')})` : 'Unassigned'}</div><small>${item.assigned_at ? `Assignment updated ${escapeHtml(item.assigned_at)}` : 'No assignment history'}</small><select aria-label="Select an administrator for complaint from ${escapeHtml(submitter)}" data-complaint-assignee="${escapeHtml(item.id)}">${assigneeOptions}</select><button type="button" data-complaint-assign="${escapeHtml(item.id)}">Update assignment</button></td><td>${escapeHtml(modifier)}<small>${escapeHtml(item.updated_at)}</small></td><td><button type="button" data-complaint-view="${escapeHtml(item.id)}">View history</button><button type="button" data-complaint-update="${escapeHtml(item.id)}">Update status / reply</button></td></tr>`;
-  }).join('') || '<tr><td colspan="6">No complaints.</td></tr>';
-  if (communications) communications.innerHTML = communicationData.communications.map((item) => `<tr><td>${escapeHtml(item.recipient_name)}<small>${escapeHtml(item.recipient_email)}</small></td><td>${escapeHtml(item.subject)}</td><td>${escapeHtml(item.status)}</td><td>${escapeHtml(item.created_at)}</td></tr>`).join('') || '<tr><td colspan="4">No queued communications.</td></tr>';
+  if (complaints && complaintRequestVersion === cache.supportPageRequests.complaints) {
+    cache.supportPageData.complaints = complaintData.page;
+    renderSupportPage('complaints', complaintData.complaints, complaintData.page);
+  }
+  if (communications && communicationRequestVersion === cache.supportPageRequests.communications) {
+    cache.supportPageData.communications = communicationData.page;
+    renderSupportPage('communications', communicationData.communications, communicationData.page);
+  }
+}
+
+async function loadControlCenter(adminUsersPromise = null, { refresh = false } = {}) {
+  if (controlCenterLoaded && !refresh) return;
+  if (controlCenterRequest && !refresh) return controlCenterRequest;
+  controlCenterRequest = renderControlCenter(adminUsersPromise);
+  try {
+    await controlCenterRequest;
+    controlCenterLoaded = true;
+  } finally {
+    controlCenterRequest = null;
+  }
 }
 
 async function showComplaintDetails(id) {
@@ -36,7 +87,7 @@ async function showComplaintDetails(id) {
   if (!dialog.open) dialog.showModal();
 }
 
-async function openRequestedAdminDestination(role) {
+async function openRequestedAdminDestination(role, loadUsers) {
   const params = new URLSearchParams(window.location.search);
   const tab = params.get('tab') || (params.has('complaint') || params.has('resetRequest') ? 'requests' : null);
   if (!tab) return;
@@ -51,6 +102,14 @@ async function openRequestedAdminDestination(role) {
   if (!activateAdminTab(tab, role, document, window, { updateUrl: false })) {
     setMessage('error', 'That administrator section is not available.');
     activateAdminTab('dashboard', role);
+    return;
+  }
+  try {
+    if (role === 'super_admin' && tab === 'requests') await loadControlCenter(loadUsers());
+    else if (role === 'super_admin' && tab === 'users') await loadUsers();
+    else await loadAdminSection(tab);
+  } catch (error) {
+    setMessage('error', error.message);
     return;
   }
   const complaintId = params.get('complaint');
@@ -92,9 +151,8 @@ export function setupLogin() {
       setMessage('success', `Welcome, ${user.name}`);
       // Catalog rendering and operations rendering use separate endpoints and
       // cache fields; start both after role validation, then open deep links.
-      await Promise.all([loadRelations(), loadAdminOps()]);
-      if (user.role === 'super_admin') await loadControlCenter();
-      await openRequestedAdminDestination(user.role);
+      await loadInitialAdminData(user.role);
+      await openRequestedAdminDestination(user.role, getManagedUsers);
     } catch (error) {
       setMessage('error', error.message);
     }
@@ -108,8 +166,28 @@ export function setupLogin() {
 
   document.getElementById('logoutBtn')?.addEventListener('click', () => signOut('../index.html'));
 
-  const renderUsers = async () => {
-    const { users } = await request('/admin/users');
+  let managedUsers = null;
+  let managedUsersRequest = null;
+  let managedUsersRequestVersion = 0;
+  const getManagedUsers = async (refresh = false) => {
+    if (managedUsers !== null && !refresh) return { users: managedUsers };
+    if (managedUsersRequest && !refresh) return managedUsersRequest;
+    const requestVersion = ++managedUsersRequestVersion;
+    managedUsersRequest = request('/admin/users').then((data) => {
+      if (requestVersion === managedUsersRequestVersion) {
+        managedUsers = data.users;
+        cache.complaintAdmins = managedUsers.filter((item) => ['regular_admin', 'super_admin'].includes(item.role) && item.status === 'active');
+      }
+      return data;
+    }).finally(() => {
+      if (requestVersion === managedUsersRequestVersion) managedUsersRequest = null;
+    });
+    return managedUsersRequest;
+  };
+  const renderUsers = async (initialUsers = null, refresh = false) => {
+    if (initialUsers !== null) managedUsers = initialUsers;
+    if (managedUsers === null || refresh) managedUsers = (await getManagedUsers(refresh)).users;
+    const users = managedUsers;
     cache.complaintAdmins = users.filter((item) => ['regular_admin', 'super_admin'].includes(item.role) && item.status === 'active');
     const list = document.getElementById('managedUserList');
     const search = String(document.getElementById('userSearch')?.value || '').toLowerCase();
@@ -118,12 +196,42 @@ export function setupLogin() {
     const filtered = users.filter((u) => !search || [u.name, u.email, u.student_id].some((v) => String(v || '').toLowerCase().includes(search))).filter((u) => !role || u.role === role).filter((u) => !status || u.status === status);
     if (list) { list._users = users; list.innerHTML = filtered.map((u) => `<tr><td>${escapeHtml(u.name)}<small>${escapeHtml(u.student_id || 'No student ID')}</small></td><td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.role.replace('_', ' '))}</td><td>${escapeHtml(u.status)}</td><td class="user-actions"><button type="button" data-action="view" data-user-id="${escapeHtml(u.id)}" aria-label="View account details for ${escapeHtml(u.name)}">View</button><button type="button" data-action="edit" data-user-id="${escapeHtml(u.id)}" aria-label="Edit account details for ${escapeHtml(u.name)}">Edit</button><button type="button" data-action="reset" data-user-id="${escapeHtml(u.id)}" aria-label="Change password for ${escapeHtml(u.name)}">Change password</button><button type="button" data-action="${u.status === 'suspended' ? 'activate' : 'suspend'}" data-user-id="${escapeHtml(u.id)}">${u.status === 'suspended' ? 'Activate account' : 'Suspend account'}</button><button type="button" class="danger" data-action="delete" data-user-id="${escapeHtml(u.id)}" aria-label="Permanently delete account for ${escapeHtml(u.name)}">Delete account</button></td></tr>`).join('') || '<tr><td colspan="5">No matching users.</td></tr>'; }
   };
+  const refreshManagedUserViews = async () => {
+    await renderUsers(null, true);
+    if (controlCenterLoaded) await loadSupportPage('complaints', cache.supportPages.complaints);
+  };
+  const loadInitialAdminData = async (role) => {
+    if (!['regular_admin', 'super_admin'].includes(role)) return;
+    const tasks = [
+      loadRelations().catch((error) => setMessage('error', `Catalog could not be loaded: ${error.message}`)),
+      loadAdminOps().catch((error) => setMessage('error', `Dashboard operations could not be loaded: ${error.message}`))
+    ];
+    void Promise.all(tasks);
+  };
+
+  if (!document._adminLazyDataListener) {
+    document._adminLazyDataListener = true;
+    const loadAdminSection = (tab) => {
+      if (cache.adminRole !== 'super_admin') return;
+      const load = tab === 'requests' ? loadControlCenter(getManagedUsers()) : tab === 'users' ? renderUsers() : Promise.resolve();
+      load.catch((error) => setMessage('error', error.message));
+    };
+    document.addEventListener('click', (event) => {
+      const target = event.target.closest('[data-admin-tab], [data-quick]');
+      if (target) loadAdminSection(target.dataset.adminTab || target.dataset.quick);
+    });
+    document.addEventListener('keydown', (event) => {
+      if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+      if (!event.target.closest('[role="tab"][data-admin-tab]')) return;
+      queueMicrotask(() => loadAdminSection(document.querySelector('[role="tab"][aria-selected="true"][data-admin-tab]')?.dataset.adminTab));
+    });
+  }
   document.getElementById('createManagedUser')?.addEventListener('click', async (event) => {
     const button = event.currentTarget;
     await withButtonBusy(button, async () => { setMessage('progress', 'Creating the account…');
     try {
       await request('/admin/users', { method: 'POST', body: JSON.stringify({ name: document.getElementById('managedUserName').value.trim(), email: document.getElementById('managedUserEmail').value.trim(), studentId: document.getElementById('managedUserStudentId').value.trim(), password: document.getElementById('managedUserPassword').value, role: document.getElementById('managedUserRole').value, status: document.getElementById('managedUserStatus').value }) });
-      setMessage('success', 'User account created. It is now available in the account list.'); await renderUsers();
+      setMessage('success', 'User account created. It is now available in the account list.'); await refreshManagedUserViews();
     } catch (error) { setMessage('error', error.message); }
     });
   });
@@ -149,11 +257,11 @@ export function setupLogin() {
         await request(`/admin/users/${user.id}`, { method: 'PUT', body: JSON.stringify({ name:user.name,email:user.email,studentId:user.student_id || '',role:user.role,status:action === 'suspend' ? 'suspended' : 'active' }) });
         setMessage('success', action === 'suspend' ? `${user.name}'s account was suspended.` : `${user.name}'s account was reactivated.`);
       }
-      await renderUsers();
+      await refreshManagedUserViews();
     } catch (error) { setMessage('error', error.message); }
     });
   });
-  dialog?.addEventListener('submit', async (event) => { event.preventDefault(); const form = event.target; const values = Object.fromEntries(new FormData(form)); await withButtonBusy(event.submitter || form.querySelector('button[type="submit"]'), async () => { setMessage('progress', form.id === 'resetUserForm' ? 'Changing the password…' : 'Saving account changes…'); try { await request(form.id === 'resetUserForm' ? `/admin/users/${dialog.dataset.userId}/reset-password` : `/admin/users/${dialog.dataset.userId}`, { method: form.id === 'resetUserForm' ? 'POST' : 'PUT', body: JSON.stringify(values) }); closeUserDialog(); setMessage('success', form.id === 'resetUserForm' ? 'The account password was changed successfully.' : 'Account details were updated successfully.'); await renderUsers(); } catch (error) { setMessage('error', error.message); } }); });
+  dialog?.addEventListener('submit', async (event) => { event.preventDefault(); const form = event.target; const values = Object.fromEntries(new FormData(form)); await withButtonBusy(event.submitter || form.querySelector('button[type="submit"]'), async () => { setMessage('progress', form.id === 'resetUserForm' ? 'Changing the password…' : 'Saving account changes…'); try { await request(form.id === 'resetUserForm' ? `/admin/users/${dialog.dataset.userId}/reset-password` : `/admin/users/${dialog.dataset.userId}`, { method: form.id === 'resetUserForm' ? 'POST' : 'PUT', body: JSON.stringify(values) }); closeUserDialog(); setMessage('success', form.id === 'resetUserForm' ? 'The account password was changed successfully.' : 'Account details were updated successfully.'); await refreshManagedUserViews(); } catch (error) { setMessage('error', error.message); } }); });
   document.getElementById('userDialogClose')?.addEventListener('click', closeUserDialog);
   dialog?.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') { event.preventDefault(); closeUserDialog(); return; }
@@ -172,8 +280,8 @@ export function setupLogin() {
     elements.dashboard.hidden = false;
     document.querySelector('[data-user-name]')?.replaceChildren(document.createTextNode(`${user.name} (${user.role.replace('_', ' ')})`));
     document.querySelectorAll('[data-super-admin]').forEach((item) => { item.hidden = user.role !== 'super_admin'; });
-    await Promise.all([loadRelations(), loadAdminOps()]); if (user.role === 'super_admin') { await renderUsers(); await loadControlCenter(); }
-    await openRequestedAdminDestination(user.role);
+    await loadInitialAdminData(user.role);
+    await openRequestedAdminDestination(user.role, getManagedUsers);
   }).catch(() => { window.location.assign('../admin-login.html'); });
 
   document.getElementById('resetRequestList')?.addEventListener('click', async (event) => {
@@ -184,7 +292,7 @@ export function setupLogin() {
     const confirmed = await openConfirmDialog({ title: approve ? 'Approve password-reset request?' : 'Reject password-reset request?', description: approve ? `Create a one-time reset link for ${account}. The link is shown once and must be sent only to the account's registered email.` : `Reject the password-reset request for ${account}. No reset link will be created.`, submitLabel: approve ? 'Approve & create link' : 'Reject request', danger: !approve });
     if (!confirmed) return;
     await withButtonBusy(button, async () => { setMessage('progress', approve ? 'Approving the request…' : 'Rejecting the request…');
-    try { const { request: reset } = await request(`/admin/password-reset-requests/${button.dataset.requestId}/${button.dataset.resetDecision}`, { method: 'POST', body: JSON.stringify({}) }); if (reset.resetLink) prompt('Copy this one-time reset link and send it only to the registered email:', `${location.origin}${reset.resetLink}`); setMessage('success', approve ? 'The reset request was approved and its one-time link was generated.' : 'The reset request was rejected.'); await loadControlCenter(); } catch (error) { setMessage('error', error.message); }
+    try { const { request: reset } = await request(`/admin/password-reset-requests/${button.dataset.requestId}/${button.dataset.resetDecision}`, { method: 'POST', body: JSON.stringify({}) }); if (reset.resetLink) prompt('Copy this one-time reset link and send it only to the registered email:', `${location.origin}${reset.resetLink}`); setMessage('success', approve ? 'The reset request was approved and its one-time link was generated.' : 'The reset request was rejected.'); await loadControlCenter(null, { refresh: true }); } catch (error) { setMessage('error', error.message); }
     });
   });
   document.getElementById('complaintList')?.addEventListener('click', async (event) => {
@@ -206,7 +314,7 @@ export function setupLogin() {
           setMessage('progress', 'Saving the complaint assignment…');
           await request(`/admin/complaints/${id}/assignment`, { method: 'POST', body: JSON.stringify({ assigneeId }) });
           setMessage('success', assigneeId ? `Complaint assigned to ${assigneeName}.` : 'Complaint is now unassigned.');
-          await loadControlCenter();
+          await loadControlCenter(null, { refresh: true });
         });
         return;
       }
@@ -225,7 +333,7 @@ export function setupLogin() {
             setMessage('progress', 'Saving the complaint update…');
             await request(`/admin/complaints/${id}`, { method: 'PUT', body: JSON.stringify({ status: form.status, reply: form.reply }) });
             setMessage('success', `Complaint status updated to ${form.status.replace('_', ' ')}. The reply was saved for registered-email delivery.`);
-            await loadControlCenter();
+            await loadControlCenter(null, { refresh: true });
           });
           break;
         } catch (error) {
@@ -236,4 +344,17 @@ export function setupLogin() {
     } catch (error) { setMessage('error', error.message); }
   });
   document.getElementById('complaintDetailClose')?.addEventListener('click', () => document.getElementById('complaintDetailDialog')?.close());
+  if (!document.getElementById('admin-panel-requests')?._supportPageListener) {
+    const requestsPanel = document.getElementById('admin-panel-requests');
+    if (requestsPanel) requestsPanel._supportPageListener = true;
+    requestsPanel?.addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-support-page]');
+      if (!button) return;
+      const { supportPage: kind, direction } = button.dataset;
+      const next = cache.supportPages[kind] + (direction === 'next' ? 1 : -1);
+      if (next < 0) return;
+      button.disabled = true;
+      try { await loadSupportPage(kind, next); } catch (error) { setMessage('error', error.message); button.disabled = false; }
+    });
+  }
 }

@@ -3,7 +3,7 @@ import { json, parseBody } from '../middleware/http.js';
 import { validatePassword } from '../services/passwordService.js';
 import {
   assignComplaint, countSuperAdmins, createCommunication, createManagedUser, decidePasswordResetRequest,
-  deleteUser, getComplaintDetails, listCommunications, listComplaints, listPasswordResetRequests,
+  deleteUser, getComplaintDetails, listCommunications as fetchCommunications, listComplaints as fetchComplaints, listPasswordResetRequests,
   listUsers, resetUserPassword, updateComplaint, updateUser
 } from '../services/authService.js';
 
@@ -14,6 +14,8 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}
 export async function handleAdminSupportRequest(req, res, url, user, support = {}) {
   const getDetails = support.getComplaintDetails || getComplaintDetails;
   const assign = support.assignComplaint || assignComplaint;
+  const getComplaints = support.listComplaints || fetchComplaints;
+  const getCommunications = support.listCommunications || fetchCommunications;
   if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/password-reset-requests`) {
     json(res, 200, { requests: await listPasswordResetRequests() });
     return true;
@@ -25,7 +27,15 @@ export async function handleAdminSupportRequest(req, res, url, user, support = {
     return true;
   }
   if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/complaints`) {
-    json(res, 200, { complaints: await listComplaints() });
+    const limitValue = url.searchParams.get('limit');
+    const offsetValue = url.searchParams.get('offset');
+    if ((limitValue !== null && (!/^\d+$/.test(limitValue) || Number(limitValue) < 1 || Number(limitValue) > 100))
+      || (offsetValue !== null && (!/^\d+$/.test(offsetValue) || Number(offsetValue) > 1_000_000))) {
+      json(res, 400, { error: 'Invalid complaint page.' }); return true;
+    }
+    const page = limitValue !== null || offsetValue !== null;
+    const result = await getComplaints(page ? { limit: limitValue || '50', offset: offsetValue || '0' } : undefined);
+    json(res, 200, page ? { complaints: result.items, page: { limit: result.limit, offset: result.offset, total: result.total } } : { complaints: result });
     return true;
   }
   const complaintDetails = url.pathname.match(new RegExp(`^${env.apiBasePath}/admin/complaints/([^/]+)$`));
@@ -56,7 +66,17 @@ export async function handleAdminSupportRequest(req, res, url, user, support = {
     return true;
   }
   if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/admin/communications`) {
-    json(res, 200, { communications: await listCommunications() });
+    const requestedLimit = url.searchParams.get('limit');
+    const requestedOffset = url.searchParams.get('offset');
+    const page = requestedLimit !== null || requestedOffset !== null;
+    const limitValue = requestedLimit || '50';
+    const offsetValue = requestedOffset || '0';
+    if (!/^\d+$/.test(limitValue) || Number(limitValue) < 1 || Number(limitValue) > 100
+      || !/^\d+$/.test(offsetValue) || Number(offsetValue) > 1_000_000) {
+      json(res, 400, { error: 'Invalid communication page.' }); return true;
+    }
+    const result = await getCommunications(page ? { limit: limitValue, offset: offsetValue } : undefined);
+    json(res, 200, page ? { communications: result.items, page: { limit: result.limit, offset: result.offset, total: result.total } } : { communications: result });
     return true;
   }
   if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/admin/communications`) {

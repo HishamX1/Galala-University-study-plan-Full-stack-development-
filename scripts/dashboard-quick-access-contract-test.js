@@ -85,9 +85,37 @@ assert.doesNotMatch(dashboard, /portalPath\('admin'\)\}#/);
 assert.match(adminOps, /activateAdminTab\(quick\.dataset\.quick, cache\.adminRole\)/);
 assert.doesNotMatch(adminOps, /querySelector\(`\[data-admin-tab=/);
 assert.match(adminAuth, /activateAdminTab\(tab, role, document, window, \{ updateUrl: false \}\)/);
-assert.match(adminAuth, /await openRequestedAdminDestination\(user\.role\)/);
-assert.equal((adminAuth.match(/await Promise\.all\(\[loadRelations\(\), loadAdminOps\(\)\]\)/g) || []).length, 2,
-  'login and session restoration start independent catalog and operations initialization together');
+assert.match(adminAuth, /await openRequestedAdminDestination\(user\.role, getManagedUsers\)/);
+assert.equal((adminAuth.match(/await loadInitialAdminData\(user\.role\)/g) || []).length, 2,
+  'login and session restoration use the shared concurrent workspace initializer');
+assert.match(adminAuth, /if \(role === 'super_admin' && tab === 'requests'\) await loadControlCenter\(loadUsers\(\)\)/,
+  'direct request-tab links load their data before presenting complaint or reset details');
+assert.match(adminAuth, /if \(role === 'super_admin' && tab === 'users'\) await loadUsers\(\)/,
+  'direct user-management links load the account list');
+assert.match(adminAuth, /loadRelations\(\)\.catch\(\(error\) => setMessage\('error', `Catalog could not be loaded: \$\{error\.message\}`\)\)/,
+  'catalog loading failure is surfaced without blocking the control panel');
+assert.match(adminAuth, /loadAdminOps\(\)\.catch\(\(error\) => setMessage\('error', `Dashboard operations could not be loaded: \$\{error\.message\}`\)\)/,
+  'dashboard operations failure is surfaced without blocking secondary tabs');
+assert.match(adminAuth, /const tasks = \[[\s\S]*?loadRelations\(\)[\s\S]*?loadAdminOps\(\)[\s\S]*?void Promise\.all\(tasks\)/,
+  'initial catalog and dashboard requests run concurrently without delaying tab or deep-link activation');
+assert.match(adminOps, /export async function loadAdminOps\(\) \{\s*const sections = new Set\(\['dashboard', \.\.\.loadedSections\]\)/,
+  'admin operations startup refreshes the dashboard and only previously visited secondary sections');
+assert.match(adminOps, /export async function loadAdminSection\(section, \{ refresh = false \} = \{\}\)[\s\S]*?section === 'audit'[\s\S]*?section === 'recycle'[\s\S]*?section === 'backup'[\s\S]*?section === 'health'[\s\S]*?section === 'transfer'/,
+  'audit, recycle bin, backup, health, and import-stage data load on demand');
+assert.match(adminOps, /activateAdminTab\(button\.dataset\.adminTab, cache\.adminRole\);\s*loadAdminSection\(button\.dataset\.adminTab\)/,
+  'opening an admin tab starts its data load immediately');
+assert.match(adminOps, /sectionRequestVersions\.set\(section, requestVersion\)[\s\S]*?sectionRequestVersions\.get\(section\) === requestVersion[\s\S]*?sectionRequestVersions\.get\(section\) !== requestVersion/,
+  'older tab refresh responses cannot overwrite newer data');
+assert.match(adminOps, /let auditRequestVersion = 0;[\s\S]*?const requestVersion = \+\+auditRequestVersion[\s\S]*?if \(requestVersion !== auditRequestVersion\) return;/,
+  'rapid audit filter requests ignore stale responses');
+assert.match(adminAuth, /const load = tab === 'requests' \? loadControlCenter\(getManagedUsers\(\)\) : tab === 'users' \? renderUsers\(\)/,
+  'secondary support and user tabs fetch their data when opened');
+assert.match(adminAuth, /let managedUsers = null;[\s\S]*?const getManagedUsers = async[\s\S]*?request\('\/admin\/users'\)[\s\S]*?if \(managedUsers === null \|\| refresh\) managedUsers = \(await getManagedUsers\(refresh\)\)\.users/,
+  'the account list is deduplicated between users and request assignment data and reused for local filters');
+assert.equal((adminAuth.match(/await refreshManagedUserViews\(\)/g) || []).length, 3,
+  'account creation, updates, and password changes refresh managed-user views');
+assert.match(adminAuth, /const refreshManagedUserViews = async \(\) => \{\s*await renderUsers\(null, true\);\s*if \(controlCenterLoaded\) await loadSupportPage\('complaints', cache\.supportPages\.complaints\);/,
+  'account mutations refresh only the loaded complaints page whose assignment options changed');
 const internalQuickActions = [...adminHtml.matchAll(/<button type="button" data-quick="([^"]+)">([\s\S]*?)<\/button>/g)].map((match) => [match[2].replace(/<svg[\s\S]*?<\/svg>/, '').replace(/<[^>]+>/g, '').trim(), match[1]]);
 assert.deepEqual(internalQuickActions, [
   ['Add faculty', 'catalog'], ['Add program', 'catalog'], ['Add course', 'catalog'], ['Manage relations', 'catalog'],

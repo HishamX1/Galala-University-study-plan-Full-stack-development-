@@ -147,6 +147,9 @@ jobs:
           npm run test:foundation &&
           npm run test:doctor-contract &&
           npm run test:dashboard &&
+          npm run check:support-pagination &&
+          npm run test:support-pagination &&
+          npm run check:dashboard-db-performance &&
           npm run check:dashboard-quick-access &&
           npm run test:dashboard-quick-access &&
           npm run check:admin-ui-contract &&
@@ -163,4 +166,5 @@ jobs:
           npm run test:catalog-crud &&
           npm run test:complaint-visibility &&
           npm run test:notification-read &&
-          npm run test:password-reset-email
+          npm run test:password-reset-email &&
+          npm run test:dashboard-db-performance

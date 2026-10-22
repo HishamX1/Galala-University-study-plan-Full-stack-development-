@@ -9,6 +9,9 @@ export const cache = {
   importStages: [],
   systemHealth: null,
   complaintAdmins: [],
+  supportPages: { complaints: 0, communications: 0 },
+  supportPageData: { complaints: null, communications: null },
+  supportPageRequests: { complaints: 0, communications: 0 },
   adminRole: null,
   auditOffset: 0,
   courseSort: { key: 'code', direction: 'asc' }

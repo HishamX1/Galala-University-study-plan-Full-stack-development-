@@ -5,7 +5,7 @@ import { requireIsolatedTestDatabase } from './helpers/require-isolated-test-dat
 requireIsolatedTestDatabase();
 
 const { closePool, query } = await import('../backend/src/db/client.js');
-const { assignComplaint, createComplaint, createUser, getComplaintDetails, listComplaints, updateComplaint } = await import('../backend/src/services/authService.js');
+const { assignComplaint, createComplaint, createUser, getComplaintDetails, listComplaints, listCommunications, updateComplaint } = await import('../backend/src/services/authService.js');
 
 const suffix = crypto.randomUUID().replaceAll('-', '');
 const functionName = `complaint_fail_audit_${suffix}`;
@@ -16,10 +16,34 @@ let legacyComplaintId;
 let studentEmail;
 let legacyEmail;
 let failedComplaintEmail;
+let performanceStudentId;
+let performanceMessagePrefix;
 const superAdmin = { id: null, role: 'super_admin', name: `Visibility Reviewer ${suffix}` };
 
 async function count(sql, params = []) {
   return Number((await query(sql, params)).rows[0].count);
+}
+
+function summarizePlan(explain) {
+  const scans = [];
+  const visit = (node) => {
+    if (node['Relation Name']) scans.push({
+      type: node['Node Type'],
+      relation: node['Relation Name'],
+      index: node['Index Name'] || null,
+      rows: node['Actual Rows'],
+      executionMs: node['Actual Total Time'],
+      sharedHitBlocks: node['Shared Hit Blocks'],
+      sharedReadBlocks: node['Shared Read Blocks']
+    });
+    for (const child of node.Plans || []) visit(child);
+  };
+  visit(explain.Plan);
+  return {
+    executionMs: explain['Execution Time'],
+    root: explain.Plan['Node Type'],
+    scans
+  };
 }
 
 try {
@@ -43,6 +67,82 @@ try {
   assert.equal(listed.current_submitter_name, student.name);
   assert.equal(listed.email, student.email);
   assert.equal(listed.assigned_to, null);
+  performanceStudentId = student.id;
+  performanceMessagePrefix = `Synthetic pagination fixture ${suffix}`;
+  await query(`INSERT INTO public.student_complaints (student_id,email,message,submitted_by,submitted_name)
+    SELECT $1,$2,$3 || ' ' || series::text,$4,$5
+      FROM generate_series(1,20000) AS series`, [`PERF-${suffix.slice(0, 12)}`, student.email, performanceMessagePrefix, student.id, student.name]);
+  await query(`INSERT INTO public.communication_outbox (recipient_id,sender_id,kind,subject,body,status)
+    SELECT $1,$2,'message','Synthetic pagination fixture',repeat('x',1024),'queued'
+      FROM generate_series(1,20000)`, [student.id, reviewer.id]);
+  await query('ANALYZE public.student_complaints');
+  await query('ANALYZE public.communication_outbox');
+  const plans = {};
+  const planCases = [
+    {
+      tableName: 'student_complaints',
+      indexName: 'idx_student_complaints_created_id',
+      sql: `SELECT c.*, submitter.name AS current_submitter_name,
+        modifier.name AS last_modified_by_name, assignee.name AS assigned_to_name,
+        assigner.name AS assigned_by_name FROM public.student_complaints c
+        LEFT JOIN public.app_users submitter ON submitter.id=c.submitted_by
+        LEFT JOIN public.app_users modifier ON modifier.id=c.last_modified_by
+        LEFT JOIN public.app_users assignee ON assignee.id=c.assigned_to
+        LEFT JOIN public.app_users assigner ON assigner.id=c.assigned_by
+        ORDER BY c.created_at DESC,c.id DESC LIMIT 50 OFFSET 0`
+    },
+    {
+      tableName: 'communication_outbox',
+      indexName: 'idx_communication_outbox_created_id',
+      sql: `SELECT c.id,c.kind,c.subject,c.body,c.status,c.created_at,
+        u.name AS recipient_name,u.email AS recipient_email FROM public.communication_outbox c
+        JOIN public.app_users u ON u.id=c.recipient_id
+        ORDER BY c.created_at DESC,c.id DESC LIMIT 50 OFFSET 0`
+    }
+  ];
+  for (const { tableName, indexName, sql } of planCases) {
+    await query(`DROP INDEX IF EXISTS public.${indexName}`);
+    const withoutIndex = (await query(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${sql}`)).rows[0]['QUERY PLAN'][0];
+    plans[`${tableName}WithoutIndex`] = summarizePlan(withoutIndex);
+    await query(`CREATE INDEX ${indexName} ON public.${tableName} (created_at DESC, id DESC)`);
+    const withIndex = (await query(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${sql}`)).rows[0]['QUERY PLAN'][0];
+    plans[`${tableName}WithIndex`] = summarizePlan(withIndex);
+    assert.equal(plans[`${tableName}WithIndex`].scans.some((scan) => scan.index === indexName), true,
+      `${indexName} should support the ordered page query in the synthetic fixture`);
+    plans[`${tableName}IndexBytes`] = Number((await query('SELECT pg_relation_size($1::regclass) AS bytes', [`public.${indexName}`])).rows[0].bytes);
+  }
+  console.log(JSON.stringify({ supportPaginationPlans: plans }));
+  await query('DROP INDEX IF EXISTS public.idx_student_complaints_created_id');
+  await query('DROP INDEX IF EXISTS public.idx_communication_outbox_created_id');
+
+  const fullComplaintList = await listComplaints();
+  const complaintPage = await listComplaints({ limit: 1, offset: 0 });
+  assert.equal(complaintPage.items.length, 1);
+  assert.ok(complaintPage.total >= 120);
+  assert.equal(complaintPage.limit, 1);
+  assert.equal(complaintPage.total, fullComplaintList.length);
+  assert.ok(Buffer.byteLength(JSON.stringify(complaintPage)) < Buffer.byteLength(JSON.stringify(fullComplaintList)));
+  const complaintPayloadBytes = {
+    fullHistory: Buffer.byteLength(JSON.stringify(fullComplaintList)),
+    page: Buffer.byteLength(JSON.stringify(await listComplaints({ limit: 50, offset: 0 })))
+  };
+  assert.equal(complaintPayloadBytes.page < complaintPayloadBytes.fullHistory, true);
+
+  const fullCommunicationList = await listCommunications();
+  const communicationPage = await listCommunications({ limit: 5, offset: 0 });
+  assert.ok(communicationPage.items.length <= 5);
+  assert.equal(communicationPage.total, fullCommunicationList.length);
+  const communicationPayloadBytes = {
+    fullHistory: Buffer.byteLength(JSON.stringify(fullCommunicationList)),
+    page: Buffer.byteLength(JSON.stringify(await listCommunications({ limit: 50, offset: 0 })))
+  };
+  assert.equal(communicationPayloadBytes.page < communicationPayloadBytes.fullHistory, true);
+  console.log(JSON.stringify({
+    supportPaginationPayloadBytes: {
+      complaints: { records: fullComplaintList.length, ...complaintPayloadBytes },
+      communications: { records: fullCommunicationList.length, ...communicationPayloadBytes }
+    }
+  }));
 
   legacyEmail = `legacy-complaint-${suffix}@example.test`;
   legacyComplaintId = (await query('INSERT INTO public.student_complaints (student_id,email,message) VALUES ($1,$2,$3) RETURNING id', [`LEGACY-${suffix.slice(0, 12)}`, legacyEmail, 'Historical fixture without identity metadata'])).rows[0].id;
@@ -112,6 +212,8 @@ try {
 
   console.log('Complaint submitter, assignment history, modification attribution, and audit rollback integration tests passed.');
 } finally {
+  await query('DROP INDEX IF EXISTS public.idx_student_complaints_created_id').catch(() => {});
+  await query('DROP INDEX IF EXISTS public.idx_communication_outbox_created_id').catch(() => {});
   await query(`DROP TRIGGER IF EXISTS "${triggerName}" ON public.admin_audit_logs`).catch(() => {});
   await query(`DROP FUNCTION IF EXISTS public."${functionName}"()`).catch(() => {});
   if (complaintId) {
@@ -121,6 +223,10 @@ try {
   if (legacyComplaintId) await query('DELETE FROM public.student_complaints WHERE id=$1', [legacyComplaintId]).catch(() => {});
   if (studentEmail) await query('DELETE FROM public.student_complaints WHERE email=$1', [studentEmail]).catch(() => {});
   if (failedComplaintEmail) await query('DELETE FROM public.student_complaints WHERE email=$1', [failedComplaintEmail]).catch(() => {});
+  if (performanceStudentId && performanceMessagePrefix) {
+    await query('DELETE FROM public.student_complaints WHERE submitted_by=$1 AND message LIKE $2', [performanceStudentId, `${performanceMessagePrefix}%`]).catch(() => {});
+    await query('DELETE FROM public.communication_outbox WHERE recipient_id=$1 AND subject=$2', [performanceStudentId, 'Synthetic pagination fixture']).catch(() => {});
+  }
   if (createdUserIds.length) {
     await query('DELETE FROM public.admin_audit_logs WHERE actor_id=ANY($1::uuid[])', [createdUserIds]).catch(() => {});
     await query('DELETE FROM public.app_users WHERE id=ANY($1::uuid[])', [createdUserIds]).catch(() => {});

@@ -101,6 +101,8 @@
 @keyframes admin-spin { to { transform: rotate(360deg); } }
 
 .admin-progress { margin: 0; padding: .7rem .9rem; border-inline-start: 4px solid var(--gu-info); border-radius: 6px; background: #eff8ff; color: #075985; }
+.support-pagination { display:flex; align-items:center; justify-content:flex-end; gap:.75rem; margin-top:.75rem; }
+.support-pagination span { color:var(--gu-muted); font-size:.9rem; }
 .admin-shell .error:empty,
 .admin-shell .success:empty { display: none; }
 .admin-shell .error:not(:empty),

@@ -7,11 +7,13 @@ import {
 } from '../backend/src/repositories/auditRepository.js';
 import { findLatestBackupCreatedAt } from '../backend/src/repositories/backupRepository.js';
 import { findDeletedEntity } from '../backend/src/repositories/recycleBinRepository.js';
+import { listComplaintRecords, listCommunicationRecords } from '../backend/src/repositories/notificationRepository.js';
 
 const calls = [];
 const executor = {
   async query(sql, params = []) {
     calls.push({ sql, params });
+    if (sql.includes('SELECT count(*)::int AS total')) return { rows: [{ total: 1 }] };
     if (sql.includes('AS faculties')) return { rows: [{ faculties: 2, programs: 3, courses: 4, program_courses: 5, relationships: 6 }] };
     if (sql.includes("'Faculty' AS entity")) return { rows: [{ entity: 'Faculty', count: 1 }] };
     if (sql.includes('date_trunc')) return { rows: [{ count: 9 }] };
@@ -38,6 +40,18 @@ assert.equal((await findLatestBackupCreatedAt(executor)).rows[0].id, 8);
 assert.equal((await findDeletedEntity(executor, 'faculty', 42)).rows[0].id, 8);
 assert.match(calls.at(-1).sql, /deleted_at IS NOT NULL/);
 assert.deepEqual(calls.at(-1).params, [42]);
-assert.equal(calls.length, 9);
+const complaintPage = await listComplaintRecords(executor, { limit: 25, offset: 50 });
+assert.deepEqual(complaintPage, { items: [{ id: 8, created_at: 'recent' }], total: 1, limit: 25, offset: 50 });
+assert.match(calls.at(-2).sql, /ORDER BY c\.created_at DESC, c\.id DESC LIMIT \$1 OFFSET \$2/);
+assert.deepEqual(calls.at(-2).params, [25, 50]);
+assert.match(calls.at(-1).sql, /count\(\*\)::int AS total FROM public\.student_complaints/);
+const communicationPage = await listCommunicationRecords(executor, { limit: 500, offset: -1 });
+assert.deepEqual(communicationPage, { items: [{ id: 8, created_at: 'recent' }], total: 1, limit: 100, offset: 0 });
+assert.match(calls.at(-2).sql, /ORDER BY c\.created_at DESC,c\.id DESC LIMIT \$1 OFFSET \$2/);
+assert.deepEqual(calls.at(-2).params, [100, 0]);
+const legacyCommunications = await listCommunicationRecords(executor);
+assert.deepEqual(legacyCommunications, [{ id: 8, created_at: 'recent' }]);
+assert.match(calls.at(-1).sql, /ORDER BY c\.created_at DESC,c\.id DESC$/);
+assert.equal(calls.length, 14);
 
 console.log('Admin operations repository tests passed.');

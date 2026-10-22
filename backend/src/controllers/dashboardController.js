@@ -8,9 +8,18 @@ export async function handleDashboardRequest(req, res, url, user, services = {})
   const readNotification = services.markNotificationRead || markNotificationRead;
   const readAllNotifications = services.markAllDashboardNotificationsRead || markAllDashboardNotificationsRead;
   if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/dashboard`) {
-    const dashboard = await getDashboardData(user);
-    if (user.role !== 'student') dashboard.catalog = await getDashboardSummary(user);
-    if (hasPermission(user, Permissions.systemRead)) dashboard.systemHealth = await getSystemHealth();
+    const loadDashboardData = services.getDashboardData || getDashboardData;
+    const loadDashboardSummary = services.getDashboardSummary || getDashboardSummary;
+    const loadSystemHealth = services.getSystemHealth || getSystemHealth;
+    const hasCatalogAccess = user.role !== 'student';
+    const hasSystemAccess = hasPermission(user, Permissions.systemRead);
+    const [dashboard, catalog, systemHealth] = await Promise.all([
+      loadDashboardData(user),
+      hasCatalogAccess ? loadDashboardSummary(user) : Promise.resolve(null),
+      hasSystemAccess ? loadSystemHealth() : Promise.resolve(null)
+    ]);
+    if (hasCatalogAccess) dashboard.catalog = catalog;
+    if (hasSystemAccess) dashboard.systemHealth = systemHealth;
     return json(res, 200, dashboard);
   }
   if (req.method === 'PUT' && url.pathname === `${env.apiBasePath}/profile`) {
