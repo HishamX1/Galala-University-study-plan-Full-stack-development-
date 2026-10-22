@@ -12,6 +12,8 @@ This implementation is based on `main` SHA `6b7f7e4c550a9478bf13d3fd0590640a2e18
 
 User search and role/status filters now render from the in-memory account list instead of fetching `/admin/users` on every input event. Account creation, account updates, and password changes explicitly refresh the list after a successful mutation. The request count for local search/filter interaction drops from one full user-list request per input event to zero; update refresh behavior is preserved.
 
+The database diagnostic command, `npm run test:dashboard-db-performance`, is guarded to the loopback disposable PostgreSQL database. It creates and removes a UUID-scoped fixture with 2,500 program-course rows and 10,000 relationships, refreshes test-table statistics, records 30 warmed dashboard-service samples with P50/P95, and captures `EXPLAIN ANALYZE` summaries for the catalog snapshot reads. It reports measurements without imposing latency thresholds. The GitHub Actions integration job runs it after the PostgreSQL regressions.
+
 The landing background JPEG was resized from 4000×3000 to 2400×1800 and re-encoded at JPEG quality 86, shrinking from 3,275,543 bytes to 547,182 bytes (83.3%). The student-card background was resized from 1280×960 to 1100×825 at the same quality, shrinking from 500,863 bytes to 141,305 bytes (71.8%). Existing filenames and JPEG formats preserve current CSS references and browser compatibility. The candidate images were visually inspected, but browser rendering at desktop and mobile viewports was not available. The logo PNG was not changed.
 
 ## Synthetic before/after calculation measurement

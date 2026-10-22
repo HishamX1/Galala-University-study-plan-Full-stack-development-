@@ -18,6 +18,8 @@
     "test:refresh-rollback": "node scripts/refresh-transaction-rollback-test.js",
     "test:student-portal": "node scripts/student-portal-regression-test.js",
     "test:dashboard": "node scripts/dashboard-contract-test.js",
+    "check:dashboard-db-performance": "node --check scripts/dashboard-db-performance-test.js",
+    "test:dashboard-db-performance": "node scripts/dashboard-db-performance-test.js",
     "test:dashboard-analytics-performance": "node scripts/dashboard-analytics-performance-test.js",
     "test:dashboard-quick-access": "node scripts/dashboard-quick-access-contract-test.js",
     "check:dashboard-quick-access": "node --check frontend/shared/adminNavigation.js && node --check frontend/dashboard.js && node --check frontend/admin/modules/adminOps.js && node --check frontend/admin/modules/auth.js && node --check scripts/dashboard-quick-access-contract-test.js",
