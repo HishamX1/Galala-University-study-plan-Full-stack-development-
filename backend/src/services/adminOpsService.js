@@ -66,13 +66,19 @@ function normalizedExport(catalog) {
     list.push(relation);
     relationsByCourse.set(Number(relation.course_id), list);
   }
+  const requiredForByCourse = new Map();
+  for (const relation of catalog.relationships) {
+    const key = Number(relation.prerequisite_course_id);
+    const list = requiredForByCourse.get(key) || [];
+    list.push(relation);
+    requiredForByCourse.set(key, list);
+  }
   const courses = catalog.programCourses.map((course) => {
     const program = programById.get(Number(course.program_id));
     const faculty = facultyById.get(Number(program?.faculty_id));
     const relations = relationsByCourse.get(Number(course.id)) || [];
     const prerequisiteCodes = relations.map((relation) => courseById.get(Number(relation.prerequisite_course_id))?.code).filter(Boolean);
-    const requiredForCodes = catalog.relationships
-      .filter((relation) => Number(relation.prerequisite_course_id) === Number(course.id))
+    const requiredForCodes = (requiredForByCourse.get(Number(course.id)) || [])
       .map((relation) => courseById.get(Number(relation.course_id))?.code).filter(Boolean);
     return {
       faculty: faculty?.name || '', program: program?.name || '', courseCode: course.code, courseName: course.name,
@@ -179,50 +185,81 @@ export async function getAuditLogs(filters = {}) {
   return rows.map((row) => ({ ...row, id: toInt(row.id), entityId: row.entity_id == null ? null : toInt(row.entity_id) }));
 }
 
-export async function getDashboardSummary(actor = null) {
-  return withPostgresClient(async (client) => {
-    const catalog = await catalogRows(client);
+export function summarizeDashboardCatalog(catalog, deletedRows = []) {
     const relations = catalog.relationships;
-    const scopedActorId = actor?.role === 'regular_admin' ? actor.id : null;
-    const today = await countTodayAuditEvents(client, scopedActorId);
-    const logs = await listRecentAuditEvents(client, { actorId: scopedActorId });
-    const deleted = await countDeletedCatalogEntities(client);
+    const coursesByProgram = new Map();
+    const courseIds = new Set();
+    const semesterIds = new Set();
+    for (const course of catalog.programCourses) {
+      const programId = Number(course.program_id);
+      coursesByProgram.set(programId, (coursesByProgram.get(programId) || 0) + 1);
+      courseIds.add(Number(course.course_id));
+      semesterIds.add(`${course.program_id}:${course.year_no}:${course.semester_no}`);
+    }
+    const prerequisiteCountsByCourse = new Map();
+    const prerequisiteCourseIds = new Set();
+    const requiredForCourseIds = new Set();
+    let visibleRelationshipCount = 0;
+    let hiddenRelationshipCount = 0;
+    for (const relation of relations) {
+      const courseId = Number(relation.course_id);
+      const prerequisiteId = Number(relation.prerequisite_course_id);
+      prerequisiteCountsByCourse.set(courseId, (prerequisiteCountsByCourse.get(courseId) || 0) + 1);
+      if (prerequisiteId !== courseId) prerequisiteCountsByCourse.set(prerequisiteId, (prerequisiteCountsByCourse.get(prerequisiteId) || 0) + 1);
+      prerequisiteCourseIds.add(courseId);
+      requiredForCourseIds.add(prerequisiteId);
+      if (relation.visible_to_students === false) hiddenRelationshipCount += 1;
+      else visibleRelationshipCount += 1;
+    }
     const programCounts = catalog.programs.map((program) => ({
       id: toInt(program.id),
       name: program.name,
-      count: catalog.programCourses.filter((course) => Number(course.program_id) === Number(program.id)).length
+      count: coursesByProgram.get(Number(program.id)) || 0
     }));
     const prerequisiteCounts = catalog.programCourses.map((course) => ({
       code: course.code,
       name: course.name,
-      count: relations.filter((relation) => Number(relation.course_id) === Number(course.id) || Number(relation.prerequisite_course_id) === Number(course.id)).length
+      count: prerequisiteCountsByCourse.get(Number(course.id)) || 0
     }));
     return {
       counts: {
         faculties: catalog.faculties.length,
         programs: catalog.programs.length,
-        courses: new Set(catalog.programCourses.map((course) => Number(course.course_id))).size,
+        courses: courseIds.size,
         programCourses: catalog.programCourses.length,
         relationships: relations.length,
-        hiddenRelationships: relations.filter((relation) => relation.visible_to_students === false).length,
-        recycleBin: countBy(deleted.rows, 'count')
+        hiddenRelationships: hiddenRelationshipCount,
+        recycleBin: countBy(deletedRows, 'count')
       },
-      todayActivity: Number(today.rows[0]?.count || 0),
-      latestActivity: logs.rows.map((row) => ({ ...row, id: toInt(row.id), entityId: row.entity_id == null ? null : toInt(row.entity_id) })),
+      todayActivity: 0,
+      latestActivity: [],
       analytics: {
-        visibleRelationships: relations.filter((relation) => relation.visible_to_students !== false).length,
-        coursesWithoutPrerequisites: catalog.programCourses.filter((course) => !relations.some((relation) => Number(relation.course_id) === Number(course.id))).length,
-        coursesWithoutRequiredFor: catalog.programCourses.filter((course) => !relations.some((relation) => Number(relation.prerequisite_course_id) === Number(course.id))).length,
+        visibleRelationships: visibleRelationshipCount,
+        coursesWithoutPrerequisites: catalog.programCourses.filter((course) => !prerequisiteCourseIds.has(Number(course.id))).length,
+        coursesWithoutRequiredFor: catalog.programCourses.filter((course) => !requiredForCourseIds.has(Number(course.id))).length,
         largestProgram: programCounts.sort((a, b) => b.count - a.count)[0] || null,
         smallestProgram: programCounts.sort((a, b) => a.count - b.count)[0] || null,
         averageCoursesPerSemester: catalog.programCourses.length
-          ? Number((catalog.programCourses.length / new Set(catalog.programCourses.map((course) => `${course.program_id}:${course.year_no}:${course.semester_no}`)).size).toFixed(2))
+          ? Number((catalog.programCourses.length / semesterIds.size).toFixed(2))
           : 0,
         averagePrerequisites: catalog.programCourses.length ? Number((relations.length / catalog.programCourses.length).toFixed(2)) : 0,
         mostConnectedCourse: prerequisiteCounts.sort((a, b) => b.count - a.count)[0] || null,
-        unusedCourses: catalog.programCourses.filter((course) => !relations.some((relation) => Number(relation.course_id) === Number(course.id) || Number(relation.prerequisite_course_id) === Number(course.id))).length
+        unusedCourses: catalog.programCourses.filter((course) => !prerequisiteCourseIds.has(Number(course.id)) && !requiredForCourseIds.has(Number(course.id))).length
       }
     };
+}
+
+export async function getDashboardSummary(actor = null) {
+  return withPostgresClient(async (client) => {
+    const catalog = await catalogRows(client);
+    const scopedActorId = actor?.role === 'regular_admin' ? actor.id : null;
+    const today = await countTodayAuditEvents(client, scopedActorId);
+    const logs = await listRecentAuditEvents(client, { actorId: scopedActorId });
+    const deleted = await countDeletedCatalogEntities(client);
+    const summary = summarizeDashboardCatalog(catalog, deleted.rows);
+    summary.todayActivity = Number(today.rows[0]?.count || 0);
+    summary.latestActivity = logs.rows.map((row) => ({ ...row, id: toInt(row.id), entityId: row.entity_id == null ? null : toInt(row.entity_id) }));
+    return summary;
   });
 }
 

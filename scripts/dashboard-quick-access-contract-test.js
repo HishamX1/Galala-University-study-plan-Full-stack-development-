@@ -86,6 +86,8 @@ assert.match(adminOps, /activateAdminTab\(quick\.dataset\.quick, cache\.adminRol
 assert.doesNotMatch(adminOps, /querySelector\(`\[data-admin-tab=/);
 assert.match(adminAuth, /activateAdminTab\(tab, role, document, window, \{ updateUrl: false \}\)/);
 assert.match(adminAuth, /await openRequestedAdminDestination\(user\.role\)/);
+assert.equal((adminAuth.match(/await Promise\.all\(\[loadRelations\(\), loadAdminOps\(\)\]\)/g) || []).length, 2,
+  'login and session restoration start independent catalog and operations initialization together');
 const internalQuickActions = [...adminHtml.matchAll(/<button type="button" data-quick="([^"]+)">([\s\S]*?)<\/button>/g)].map((match) => [match[2].replace(/<svg[\s\S]*?<\/svg>/, '').replace(/<[^>]+>/g, '').trim(), match[1]]);
 assert.deepEqual(internalQuickActions, [
   ['Add faculty', 'catalog'], ['Add program', 'catalog'], ['Add course', 'catalog'], ['Manage relations', 'catalog'],
