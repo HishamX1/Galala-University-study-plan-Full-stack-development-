@@ -50,7 +50,7 @@ async function seedFixture() {
              ON current_course.program_id = $3 AND current_course.code = $4 || '-code-' || series::text
            JOIN program_courses prerequisite
              ON prerequisite.program_id = $3
-            AND prerequisite.code = $4 || '-code-' || (((series + offset_no - 2) % $1) + 1)::text`,
+            AND prerequisite.code = $4 || '-code-' || (((series + offset_no - 1) % $1) + 1)::text`,
         [courseCount, relationshipsPerCourse, programId, marker]
       );
       await client.query('COMMIT');
