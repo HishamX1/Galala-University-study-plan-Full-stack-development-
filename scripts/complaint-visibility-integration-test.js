@@ -24,6 +24,28 @@ async function count(sql, params = []) {
   return Number((await query(sql, params)).rows[0].count);
 }
 
+function summarizePlan(explain) {
+  const scans = [];
+  const visit = (node) => {
+    if (node['Relation Name']) scans.push({
+      type: node['Node Type'],
+      relation: node['Relation Name'],
+      index: node['Index Name'] || null,
+      rows: node['Actual Rows'],
+      executionMs: node['Actual Total Time'],
+      sharedHitBlocks: node['Shared Hit Blocks'],
+      sharedReadBlocks: node['Shared Read Blocks']
+    });
+    for (const child of node.Plans || []) visit(child);
+  };
+  visit(explain.Plan);
+  return {
+    executionMs: explain['Execution Time'],
+    root: explain.Plan['Node Type'],
+    scans
+  };
+}
+
 try {
   const student = await createUser({ name: `Student ${suffix}`, email: `student-${suffix}@example.test`, studentId: `S${suffix.slice(0, 12)}`, password: 'Complaint-Test-Password-123!', role: 'student' });
   createdUserIds.push(student.id);
@@ -77,9 +99,14 @@ try {
   ];
   for (const { tableName, indexName, sql } of planCases) {
     await query(`DROP INDEX IF EXISTS public.${indexName}`);
-    plans[`${tableName}WithoutIndex`] = (await query(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${sql}`)).rows[0]['QUERY PLAN'][0];
+    const withoutIndex = (await query(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${sql}`)).rows[0]['QUERY PLAN'][0];
+    plans[`${tableName}WithoutIndex`] = summarizePlan(withoutIndex);
     await query(`CREATE INDEX ${indexName} ON public.${tableName} (created_at DESC, id DESC)`);
-    plans[`${tableName}WithIndex`] = (await query(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${sql}`)).rows[0]['QUERY PLAN'][0];
+    const withIndex = (await query(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${sql}`)).rows[0]['QUERY PLAN'][0];
+    plans[`${tableName}WithIndex`] = summarizePlan(withIndex);
+    assert.equal(plans[`${tableName}WithIndex`].scans.some((scan) => scan.index === indexName), true,
+      `${indexName} should support the ordered page query in the synthetic fixture`);
+    plans[`${tableName}IndexBytes`] = Number((await query('SELECT pg_relation_size($1::regclass) AS bytes', [`public.${indexName}`])).rows[0].bytes);
   }
   console.log(JSON.stringify({ supportPaginationPlans: plans }));
   await query('DROP INDEX IF EXISTS public.idx_student_complaints_created_id');
@@ -182,6 +209,8 @@ try {
 
   console.log('Complaint submitter, assignment history, modification attribution, and audit rollback integration tests passed.');
 } finally {
+  await query('DROP INDEX IF EXISTS public.idx_student_complaints_created_id').catch(() => {});
+  await query('DROP INDEX IF EXISTS public.idx_communication_outbox_created_id').catch(() => {});
   await query(`DROP TRIGGER IF EXISTS "${triggerName}" ON public.admin_audit_logs`).catch(() => {});
   await query(`DROP FUNCTION IF EXISTS public."${functionName}"()`).catch(() => {});
   if (complaintId) {
