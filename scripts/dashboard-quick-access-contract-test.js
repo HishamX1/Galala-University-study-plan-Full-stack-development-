@@ -114,8 +114,8 @@ assert.match(adminAuth, /let managedUsers = null;[\s\S]*?const getManagedUsers =
   'the account list is deduplicated between users and request assignment data and reused for local filters');
 assert.equal((adminAuth.match(/await refreshManagedUserViews\(\)/g) || []).length, 3,
   'account creation, updates, and password changes refresh managed-user views');
-assert.match(adminAuth, /const refreshManagedUserViews = async \(\) => \{\s*await renderUsers\(null, true\);\s*if \(controlCenterLoaded\) await loadControlCenter\(null, \{ refresh: true \}\);/,
-  'account mutations refresh assignment options when the support tab is already loaded');
+assert.match(adminAuth, /const refreshManagedUserViews = async \(\) => \{\s*await renderUsers\(null, true\);\s*if \(controlCenterLoaded\) await loadSupportPage\('complaints', cache\.supportPages\.complaints\);/,
+  'account mutations refresh only the loaded complaints page whose assignment options changed');
 const internalQuickActions = [...adminHtml.matchAll(/<button type="button" data-quick="([^"]+)">([\s\S]*?)<\/button>/g)].map((match) => [match[2].replace(/<svg[\s\S]*?<\/svg>/, '').replace(/<[^>]+>/g, '').trim(), match[1]]);
 assert.deepEqual(internalQuickActions, [
   ['Add faculty', 'catalog'], ['Add program', 'catalog'], ['Add course', 'catalog'], ['Manage relations', 'catalog'],

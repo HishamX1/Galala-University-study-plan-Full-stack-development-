@@ -198,7 +198,7 @@ export function setupLogin() {
   };
   const refreshManagedUserViews = async () => {
     await renderUsers(null, true);
-    if (controlCenterLoaded) await loadControlCenter(null, { refresh: true });
+    if (controlCenterLoaded) await loadSupportPage('complaints', cache.supportPages.complaints);
   };
   const loadInitialAdminData = async (role) => {
     if (!['regular_admin', 'super_admin'].includes(role)) return;
