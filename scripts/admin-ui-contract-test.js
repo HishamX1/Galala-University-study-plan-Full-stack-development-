@@ -29,6 +29,20 @@ assert.equal(await withButtonBusy(busyButton, async () => {
 assert.equal(busyButton.disabled, false);
 assert.equal(busyAttributes.has('aria-busy'), false);
 assert.equal(busyButton.focused, true);
+let releaseRequest;
+let duplicateActionCalls = 0;
+const actionGate = new Promise((resolve) => { releaseRequest = resolve; });
+const firstSubmission = withButtonBusy(busyButton, async () => {
+  duplicateActionCalls += 1;
+  await actionGate;
+  return 'single submission';
+});
+assert.equal(await withButtonBusy(busyButton, async () => { duplicateActionCalls += 1; }), undefined,
+  'an overlapping submission is ignored while the first request is in flight');
+assert.equal(duplicateActionCalls, 1, 'only the first action reaches the operation');
+releaseRequest();
+assert.equal(await firstSubmission, 'single submission');
+assert.equal(busyButton.disabled, false, 'the control is restored after the in-flight request finishes');
 await assert.rejects(() => withButtonBusy(busyButton, async () => { throw new Error('expected test failure'); }), /expected test failure/);
 assert.equal(busyButton.disabled, false, 'busy controls are restored after a failed request');
 busyButton.disabled = true;
@@ -75,10 +89,14 @@ assert.match(adminOps, /withButtonBusy\(actionButton/);
 assert.match(adminDom, /setAttribute\('aria-busy', 'true'\)/);
 assert.match(adminDom, /elements\.progress\.hidden = type !== 'progress'/);
 assert.match(dialogs, /event\.key !== 'Tab'/);
+assert.match(dialogs, /event\.key === 'Escape'/, 'dialogs provide a keyboard cancel action');
+assert.match(dialogs, /event\.shiftKey[\s\S]*last\.focus\(\)/, 'dialog focus remains trapped for reverse keyboard navigation');
 assert.match(dialogs, /submitLabel = 'Delete', danger = true/);
 assert.match(auth, /Approve & create link/);
 assert.match(auth, /Assign complaint/);
 assert.match(auth, /openFormDialog\(\{ title: 'Update complaint'/);
+assert.match(auth, /draft = form;/, 'a failed complaint update retains the user-entered draft');
+assert.match(auth, /saveError = error\.message;/, 'a failed complaint update exposes an actionable error for retry');
 assert.doesNotMatch(auth, /if \(!confirm\(/, 'account deletion uses the accessible purpose-specific confirmation dialog');
 assert.doesNotMatch(auth, /prompt\('Reply to the student/);
 assert.match(auth, /escapeHtml\(u\.name\)/, 'user-controlled names are escaped in account rows');
