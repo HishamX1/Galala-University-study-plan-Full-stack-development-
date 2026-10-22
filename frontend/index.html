@@ -52,6 +52,11 @@
     .portal-media::after { content:''; position:absolute; inset:0; background:linear-gradient(180deg, rgba(5,15,29,0.02), rgba(5,15,29,0.28)); }
     .student-card .portal-media { background-image:url('images/pt-background.jpg'); }
     .admin-card .portal-media { background-image:url('images/landing-background.jpg'); }
+    @supports (background-image:image-set(url('images/landing-background.webp') type('image/webp'))) {
+      .bg-layer { background-image:linear-gradient(180deg, rgba(4,15,27,0.08), rgba(4,15,27,0.24)), image-set(url('images/landing-background.webp') type('image/webp'), url('images/landing-background.jpg') type('image/jpeg')); }
+      .student-card .portal-media { background-image:image-set(url('images/pt-background.webp') type('image/webp'), url('images/pt-background.jpg') type('image/jpeg')); }
+      .admin-card .portal-media { background-image:image-set(url('images/landing-background.webp') type('image/webp'), url('images/landing-background.jpg') type('image/jpeg')); }
+    }
     .portal-body { position:relative; z-index:2; padding:21px; display:flex; flex-direction:column; gap:13px; flex:1; }
     .portal-badge { align-self:flex-start; padding:6px 10px; border-radius:999px; background:rgba(255,255,255,0.3); border:1px solid rgba(255,255,255,0.34); color:#061f36; font-weight:800; font-size:0.78rem; box-shadow:inset 0 1px 0 rgba(255,255,255,0.32); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); }
     .portal-card h3 { font-size:1.34rem; }
