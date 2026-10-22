@@ -193,16 +193,16 @@ export async function updateOwnProfile(userId, input) {
 }
 
 export async function getDashboardData(user) {
-  const [lastSession, notices, activity, resetRequests, complaints, backups] = await Promise.all([
+  const [lastSession, notices, activity, resetRequests, complaints, backups, userCounts] = await Promise.all([
     findPriorSessionCreatedAt(user.id, { query }),
     listUserNotifications(user.id, { query }),
     user.role === 'student' ? listStudentActivity(user.id, { query }) : listRecentAuditEvents({ query }, { actorId: user.role === 'regular_admin' ? user.id : null, limit: 6 }).then((result) => result.rows),
     user.role === 'super_admin' ? listOpenResetNotifications(user.id, { query }) : Promise.resolve([]),
     user.role === 'super_admin' ? listOpenComplaintNotifications(user.id, { query }) : Promise.resolve([]),
-    user.role === 'super_admin' ? listRecentBackupNotifications(user.id, { query }) : Promise.resolve([])
+    user.role === 'super_admin' ? listRecentBackupNotifications(user.id, { query }) : Promise.resolve([]),
+    user.role === 'super_admin' ? userStatusCounts({ query }) : Promise.resolve(null)
   ]);
   const notifications = [...notices.map((item) => ({ ...item, read: Boolean(item.read), target: null })), ...resetRequests.map((item) => ({ id: `reset-${item.id}`, notification_key: `password_reset_request:${item.id}`, title: 'Password reset request', description: 'A password-reset request requires review.', timestamp: item.created_at, category: 'account', read: Boolean(item.read), target: '/admin/index.html' })), ...complaints.map((item) => ({ id: `complaint-${item.id}`, notification_key: `complaint:${item.id}`, title: 'Student complaint', description: 'A student complaint requires review.', timestamp: item.created_at, category: 'request', read: Boolean(item.read), target: '/admin/index.html' })), ...backups.slice(0, 1).map((item) => ({ id: `backup-${item.id}`, notification_key: `backup:${item.id}`, title: 'Backup available', description: 'A system backup was generated.', timestamp: item.created_at, category: 'system', read: Boolean(item.read), target: '/admin/index.html' }))].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 10);
-  const userCounts = user.role === 'super_admin' ? await userStatusCounts({ query }) : null;
   return { profile: { ...publicUser(user), avatarData: user.avatar_data || null, lastLogin: lastSession?.created_at || null, passwordChangedAt: user.password_changed_at || null }, notifications, recentActivity: activity, userCounts, studyProgress: user.role === 'student' ? { available: false, message: 'Academic progress will appear once university academic records are connected.' } : null };
 }
 

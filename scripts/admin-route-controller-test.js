@@ -38,6 +38,32 @@ async function assertResponse(handler, req, pathname, expectedStatus, expectedBo
 
 const admin = { id: 'admin-1', role: 'regular_admin' };
 
+let dashboardServicesStarted = 0;
+const startDashboardService = (value) => async () => {
+  dashboardServicesStarted += 1;
+  return Promise.resolve(value).then((result) => {
+    assert.equal(dashboardServicesStarted, 3, 'all dashboard service reads start before any one is awaited');
+    return result;
+  });
+};
+const dashboardResponse = response();
+const superAdmin = { id: 'super-admin-1', role: 'super_admin' };
+await handleDashboardRequest(
+  request('GET', `${env.apiBasePath}/dashboard`), dashboardResponse,
+  new URL(`${env.apiBasePath}/dashboard`, 'http://localhost'), superAdmin,
+  {
+    getDashboardData: startDashboardService({ profile: { id: superAdmin.id } }),
+    getDashboardSummary: startDashboardService({ counts: { courses: 4 } }),
+    getSystemHealth: startDashboardService({ backendStatus: 'green' })
+  }
+);
+assert.equal(dashboardResponse.statusCode, 200);
+assert.deepEqual(JSON.parse(dashboardResponse.body), {
+  profile: { id: superAdmin.id },
+  catalog: { counts: { courses: 4 } },
+  systemHealth: { backendStatus: 'green' }
+});
+
 await assertResponse(
   handleDashboardRequest,
   request('POST', `${env.apiBasePath}/student/complaints`, JSON.stringify({ message: '  ' })),

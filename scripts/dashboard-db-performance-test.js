@@ -6,7 +6,8 @@ import { requireIsolatedTestDatabase } from './helpers/require-isolated-test-dat
 // then import code that reads database configuration at module initialization.
 requireIsolatedTestDatabase();
 const { withPostgresClient, closePool } = await import('../backend/src/db/client.js');
-const { getDashboardSummary } = await import('../backend/src/services/adminOpsService.js');
+const { getDashboardSummary, getSystemHealth } = await import('../backend/src/services/adminOpsService.js');
+const { createUser, getDashboardData } = await import('../backend/src/services/authService.js');
 
 const courseCount = 2500;
 const relationshipsPerCourse = 4;
@@ -14,6 +15,7 @@ const warmupSamples = 5;
 const measuredSamples = 30;
 const marker = `perf-${randomUUID()}`;
 let facultyId;
+let adminUserId;
 
 async function seedFixture() {
   await withPostgresClient(async (client) => {
@@ -67,6 +69,22 @@ async function refreshFixtureStatistics() {
   ));
 }
 
+async function readDashboardSequentially(user) {
+  const dashboard = await getDashboardData(user);
+  dashboard.catalog = await getDashboardSummary(user);
+  dashboard.systemHealth = await getSystemHealth();
+  return dashboard;
+}
+
+async function readDashboardConcurrently(user) {
+  const [dashboard, catalog, systemHealth] = await Promise.all([
+    getDashboardData(user), getDashboardSummary(user), getSystemHealth()
+  ]);
+  dashboard.catalog = catalog;
+  dashboard.systemHealth = systemHealth;
+  return dashboard;
+}
+
 async function explain(client, name, sql) {
   const result = await client.query(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${sql}`);
   const plan = result.rows[0]['QUERY PLAN'][0];
@@ -88,6 +106,11 @@ function percentile(sorted, p) {
 try {
   await seedFixture();
   await refreshFixtureStatistics();
+  const adminUser = await createUser({
+    name: `${marker} admin`, email: `${marker}@example.test`,
+    password: 'Disposable-Dashboard-Performance-123!', role: 'super_admin'
+  });
+  adminUserId = adminUser.id;
   const queryPlans = await withPostgresClient(async (client) => {
     const plans = [];
     plans.push(await explain(client, 'active faculties', 'SELECT id, name, created_at, updated_at FROM faculties WHERE deleted_at IS NULL ORDER BY name'));
@@ -106,6 +129,26 @@ try {
         ORDER BY course_id, prerequisite_course_id`));
     return plans;
   });
+
+  for (let index = 0; index < warmupSamples; index += 1) {
+    await readDashboardSequentially(adminUser);
+    await readDashboardConcurrently(adminUser);
+  }
+  const sequentialDashboardMs = [];
+  const concurrentDashboardMs = [];
+  for (let index = 0; index < measuredSamples; index += 1) {
+    const sequentialStarted = performance.now();
+    const sequential = await readDashboardSequentially(adminUser);
+    sequentialDashboardMs.push(performance.now() - sequentialStarted);
+    const concurrentStarted = performance.now();
+    const concurrent = await readDashboardConcurrently(adminUser);
+    concurrentDashboardMs.push(performance.now() - concurrentStarted);
+    if (JSON.stringify(concurrent) !== JSON.stringify(sequential)) {
+      throw new Error('Concurrent dashboard reads changed the serialized dashboard response.');
+    }
+  }
+  sequentialDashboardMs.sort((left, right) => left - right);
+  concurrentDashboardMs.sort((left, right) => left - right);
 
   for (let index = 0; index < warmupSamples; index += 1) await getDashboardSummary();
   const durations = [];
@@ -128,6 +171,14 @@ try {
       min: Number(durations[0].toFixed(2)),
       max: Number(durations.at(-1).toFixed(2))
     },
+    roleAwareDashboardReadsMs: {
+      sampleCount: measuredSamples,
+      warmupSamples,
+      sequentialP50: Number(percentile(sequentialDashboardMs, 0.5).toFixed(2)),
+      sequentialP95: Number(percentile(sequentialDashboardMs, 0.95).toFixed(2)),
+      concurrentP50: Number(percentile(concurrentDashboardMs, 0.5).toFixed(2)),
+      concurrentP95: Number(percentile(concurrentDashboardMs, 0.95).toFixed(2))
+    },
     catalogQueryPlans: queryPlans,
     note: 'Dashboard-service timings include PostgreSQL, pool wait, and JavaScript work; they are not HTTP or browser timings.'
   }, null, 2));
@@ -137,6 +188,7 @@ try {
       await withPostgresClient(async (client) => {
         await client.query('BEGIN');
         try {
+          if (adminUserId) await client.query('DELETE FROM app_users WHERE id = $1', [adminUserId]);
           await client.query('DELETE FROM faculties WHERE id = $1', [facultyId]);
           await client.query("DELETE FROM courses WHERE name LIKE $1 || '-course-%'", [marker]);
           await client.query('COMMIT');
