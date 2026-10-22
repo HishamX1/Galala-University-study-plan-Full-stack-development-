@@ -132,6 +132,8 @@ jobs:
           npm run test:db-guard &&
           npm run test:refresh-rollback &&
           npm run test:admin-routes &&
+          npm run check:complaint-visibility &&
+          npm run test:complaint-visibility-contract &&
           npm run test:admin-import-staging-routes &&
           npm run test:admin-ops-repositories &&
           npm run test:admin-import &&
@@ -152,4 +154,5 @@ jobs:
           npm run test:admin-transactions &&
           npm run test:admin-import-staging &&
           npm run test:catalog-crud &&
+          npm run test:complaint-visibility &&
           npm run test:password-reset-email

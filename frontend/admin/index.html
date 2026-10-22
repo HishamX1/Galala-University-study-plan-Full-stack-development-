@@ -47,6 +47,15 @@
       font-weight: 600;
       color: #D4AF37;
     }
+
+    .complaint-detail-dialog { width: min(900px, calc(100vw - 2rem)); max-height: 90dvh; overflow: auto; border: 0; border-radius: 1rem; padding: 1.25rem; color: #102a43; }
+    .complaint-detail-dialog::backdrop { background: rgba(0, 20, 38, .68); }
+    .complaint-detail-dialog .dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+    .complaint-detail-dialog .complaint-history { padding-inline-start: 1.25rem; }
+    .complaint-detail-dialog .complaint-history li { margin-block: .75rem; }
+    .complaint-detail-dialog .complaint-message { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .complaint-row-highlight { outline: 3px solid #d4af37; outline-offset: -3px; }
+    @media (max-width: 600px) { .complaint-detail-dialog { padding: 1rem; } .complaint-detail-dialog .dialog-header { align-items: flex-start; } }
   </style>
 </head>
 <body>
@@ -255,14 +264,18 @@
       <div data-admin-panel="requests" hidden data-super-admin>
         <h3>Super Admin Control Center</h3>
         <p>Reset links are shown only once after approval; send them only to the account's registered email.</p>
-        <h4>Password Reset Requests</h4><div class="table-wrap"><table><thead><tr><th>Account</th><th>Role</th><th>Status</th><th>Requested</th><th>Action</th></tr></thead><tbody id="resetRequestList"></tbody></table></div>
-        <h4>Student Complaints / Access Issues</h4><div class="table-wrap"><table><thead><tr><th>Student</th><th>Message</th><th>Status</th><th>Reply / action</th></tr></thead><tbody id="complaintList"></tbody></table></div>
+        <h4>Password Reset Requests</h4><div class="table-wrap"><table><thead><tr><th>Account</th><th>Role</th><th>Status</th><th>Requested</th><th>Reviewed by / at</th><th>Action</th></tr></thead><tbody id="resetRequestList"></tbody></table></div>
+        <h4>Student Complaints / Access Issues</h4><div class="table-wrap"><table><thead><tr><th>Submitter</th><th>Message</th><th>Status</th><th>Assignment</th><th>Last modified</th><th>Details / action</th></tr></thead><tbody id="complaintList"></tbody></table></div>
         <h4>Communication Log</h4><div class="table-wrap"><table><thead><tr><th>Recipient</th><th>Subject</th><th>Status</th><th>Created</th></tr></thead><tbody id="communicationList"></tbody></table></div>
       </div>
     </section>
   </main>
   <div class="dialog-backdrop" id="userDialog" hidden><section class="card" role="dialog" aria-modal="true" aria-labelledby="userDialogTitle"><button type="button" id="userDialogClose">Close</button><h3 id="userDialogTitle"></h3><div class="user-dialog-body"></div></section></div>
 
+  <dialog id="complaintDetailDialog" class="complaint-detail-dialog" aria-labelledby="complaintDetailTitle">
+    <header class="dialog-header"><h2 id="complaintDetailTitle">Complaint details</h2><button type="button" id="complaintDetailClose">Close</button></header>
+    <div id="complaintDetailContent" aria-live="polite"></div>
+  </dialog>
   <div class="dialog-backdrop" id="adminDialogBackdrop" hidden>
     <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="adminDialogTitle">
       <form id="adminDialogForm">

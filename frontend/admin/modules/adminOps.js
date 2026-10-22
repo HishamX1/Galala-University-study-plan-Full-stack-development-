@@ -9,6 +9,13 @@ function fmtDate(value) {
   return value ? new Date(value).toLocaleString() : '-';
 }
 
+function supportRequestHref(log) {
+  const id = log.target_id || log.entityId || log.entity_id;
+  if (cache.adminRole !== 'super_admin' || !['complaint', 'password_reset_request'].includes(log.entity) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(id || ''))) return null;
+  const params = new URLSearchParams({ tab: 'requests', [log.entity === 'complaint' ? 'complaint' : 'resetRequest']: String(id) });
+  return `index.html?${params.toString()}`;
+}
+
 function metric(label, value, note = '') {
   return `<div class="metric-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value ?? 0)}</strong><small>${escapeHtml(note)}</small></div>`;
 }
@@ -131,7 +138,11 @@ export function renderAdminOps() {
       metric('Unused Courses', dashboard.analytics.unusedCourses)
     ].join('');
     elements.lists.activityList.innerHTML = dashboard.latestActivity?.length
-      ? dashboard.latestActivity.map((log) => `<li><strong>${escapeHtml(log.action)}</strong> ${escapeHtml(log.entity)} <span>by ${escapeHtml(log.actor_name || 'Legacy event')} · ${escapeHtml(fmtDate(log.created_at))}</span></li>`).join('')
+      ? dashboard.latestActivity.map((log) => {
+        const href = supportRequestHref(log);
+        const destination = log.entity === 'complaint' ? 'complaint details' : 'request';
+        return `<li><strong>${escapeHtml(log.action)}</strong> ${escapeHtml(log.description || log.entity)} <span>by ${escapeHtml(log.actor_name || 'Legacy event')} · ${escapeHtml(fmtDate(log.created_at))}</span>${href ? ` <a href="${escapeHtml(href)}">View ${destination}</a>` : ''}</li>`;
+      }).join('')
       : '<li class="empty-state">No audit activity yet.</li>';
   }
 
@@ -140,7 +151,7 @@ export function renderAdminOps() {
       <td>${escapeHtml(fmtDate(log.created_at))}</td>
       <td>${escapeHtml(log.action)}</td>
       <td>${escapeHtml(log.entity)}</td>
-      <td>${escapeHtml(log.entityId ?? log.target_id ?? '-')}</td>
+      <td>${supportRequestHref(log) ? `<a href="${escapeHtml(supportRequestHref(log))}">${escapeHtml(log.entityId ?? log.target_id ?? '-')} · View</a>` : escapeHtml(log.entityId ?? log.target_id ?? '-')}</td>
       <td>${escapeHtml(log.actor_name || 'Legacy event')}${log.actor_role ? ` (${escapeHtml(log.actor_role)})` : ''}</td>
       <td>${escapeHtml(log.category || 'admin')}</td>
       <td>${escapeHtml(log.outcome || 'success')}</td>

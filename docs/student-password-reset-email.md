@@ -22,6 +22,8 @@ The backend uses Resend's email-send API. Before enabling the feature, an owner 
 
 These values are validated when a student requests a reset, not at backend startup. Missing or invalid configuration returns a generic temporary-unavailability response and does not query account data. No provider credentials or production settings are configured by this code change.
 
+**Deferred production follow-up (reported 2026-10-22):** the live student reset request returned `EMAIL_UNAVAILABLE`. Verify these three variables in Render and complete a controlled reset using an authorized test account. Do not share the API key in tickets or chat. No production configuration was changed during this follow-up.
+
 ## Database and verification
 
 Apply the ordered migration `supabase/migrations/20261022120000_student_password_reset_email.sql` through the project's approved migration process before enabling this endpoint. It labels token delivery sources and adds the account-rate-limit index. Do not apply it to a hosted database as part of this feature review.
