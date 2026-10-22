@@ -6,6 +6,11 @@ import { openConfirmDialog } from './dialogs.js';
 import { cache } from './state.js';
 import { activateAdminTab } from '../../shared/adminNavigation.js';
 
+const loadedSections = new Set();
+const sectionRequests = new Map();
+const sectionRequestVersions = new Map();
+let auditRequestVersion = 0;
+
 function fmtDate(value) {
   return value ? new Date(value).toLocaleString() : '-';
 }
@@ -79,24 +84,51 @@ function renderImportStages() {
   </div>`).join('') || '<p class="empty-state">No active staged imports.</p>';
 }
 
+export async function loadAdminSection(section, { refresh = false } = {}) {
+  if (loadedSections.has(section) && !refresh) return;
+  if (sectionRequests.has(section) && !refresh) return sectionRequests.get(section);
+  const requestVersion = (sectionRequestVersions.get(section) || 0) + 1;
+  sectionRequestVersions.set(section, requestVersion);
+  const task = (async () => {
+    if (section === 'dashboard') {
+      const dashboard = await request('/admin/dashboard');
+      if (sectionRequestVersions.get(section) === requestVersion) cache.dashboard = dashboard;
+    }
+    else if (section === 'audit') await loadAuditLogs();
+    else if (section === 'recycle' && cache.adminRole === 'super_admin') {
+      const recycleBin = await request('/admin/recycle-bin');
+      if (sectionRequestVersions.get(section) === requestVersion) cache.recycleBin = recycleBin;
+    } else if (section === 'backup') {
+      const backups = await request('/admin/backups');
+      if (sectionRequestVersions.get(section) === requestVersion) cache.backups = backups;
+    } else if (section === 'health' && cache.adminRole === 'super_admin') {
+      const health = await request('/admin/system-health');
+      if (sectionRequestVersions.get(section) === requestVersion) cache.systemHealth = health;
+    } else if (section === 'transfer') {
+      const importStages = await request('/admin/import/stages');
+      if (sectionRequestVersions.get(section) === requestVersion) cache.importStages = importStages;
+    }
+    else return;
+    if (sectionRequestVersions.get(section) !== requestVersion) return;
+    loadedSections.add(section);
+    renderAdminOps();
+  })();
+  sectionRequests.set(section, task);
+  try {
+    await task;
+  } finally {
+    if (sectionRequests.get(section) === task) sectionRequests.delete(section);
+  }
+}
+
 export async function loadAdminOps() {
-  const [dashboard, recycleBin, backups, health, importStages] = await Promise.all([
-    request('/admin/dashboard'),
-    cache.adminRole === 'super_admin' ? request('/admin/recycle-bin') : Promise.resolve([]),
-    request('/admin/backups'),
-    cache.adminRole === 'super_admin' ? request('/admin/system-health') : Promise.resolve(null),
-    request('/admin/import/stages')
-  ]);
-  cache.dashboard = dashboard;
-  cache.recycleBin = recycleBin;
-  cache.backups = backups;
-  cache.systemHealth = health;
-  cache.importStages = importStages;
-  await loadAuditLogs();
+  const sections = new Set(['dashboard', ...loadedSections]);
+  await Promise.all([...sections].map((section) => loadAdminSection(section, { refresh: true })));
   renderAdminOps();
 }
 
 export async function loadAuditLogs() {
+  const requestVersion = ++auditRequestVersion;
   const params = new URLSearchParams({
     range: elements.ids.auditRange?.value || '',
     entity: elements.ids.auditEntity?.value || '',
@@ -109,7 +141,10 @@ export async function loadAuditLogs() {
     limit: '50',
     offset: String(cache.auditOffset)
   });
-  cache.auditLogs = await request(`/admin/audit-logs?${params.toString()}`);
+  const auditLogs = await request(`/admin/audit-logs?${params.toString()}`);
+  if (requestVersion !== auditRequestVersion) return;
+  cache.auditLogs = auditLogs;
+  loadedSections.add('audit');
   if (elements.ids.auditPrevious) elements.ids.auditPrevious.disabled = cache.auditOffset === 0;
   if (elements.ids.auditNext) elements.ids.auditNext.disabled = cache.auditLogs.length < 50;
   if (elements.ids.auditPage) elements.ids.auditPage.textContent = `Page ${Math.floor(cache.auditOffset / 50) + 1}`;
@@ -214,12 +249,15 @@ export function bindAdminOpsActions() {
     if (event.key === 'End') nextIndex = tabs.length - 1;
     if (nextIndex === null) return;
     event.preventDefault();
-    activateAdminTab(tabs[nextIndex].dataset.adminTab, cache.adminRole, document, window, { focus: true });
+    const nextTab = tabs[nextIndex].dataset.adminTab;
+    activateAdminTab(nextTab, cache.adminRole, document, window, { focus: true });
+    loadAdminSection(nextTab).catch((error) => setMessage('error', error.message));
   });
 
   document.querySelectorAll('[data-admin-tab]').forEach((button) => {
     button.addEventListener('click', () => {
       activateAdminTab(button.dataset.adminTab, cache.adminRole);
+      loadAdminSection(button.dataset.adminTab).catch((error) => setMessage('error', error.message));
     });
   });
 
@@ -249,6 +287,7 @@ export function bindAdminOpsActions() {
     if (!quick && !restore && !purge && !exportBtn && !backupBtn && !downloadBackup && !validateImportBtn && !stageImportBtn && !reviewImport && !publishImport && !cancelImport) return;
     if (quick) {
       if (!activateAdminTab(quick.dataset.quick, cache.adminRole)) setMessage('error', 'That administrator section is not available to your account.');
+      else loadAdminSection(quick.dataset.quick).catch((error) => setMessage('error', error.message));
       return;
     }
 

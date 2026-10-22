@@ -2,7 +2,7 @@ import { getWorkingApiBase, request, updateConfiguredApiBase } from './apiClient
 import { elements, setMessage, withButtonBusy } from './adminDom.js';
 import { openConfirmDialog, openFormDialog } from './dialogs.js';
 import { loadRelations } from './dataLoader.js';
-import { loadAdminOps } from './adminOps.js';
+import { loadAdminOps, loadAdminSection } from './adminOps.js';
 import { signOut } from '../../shared/session.js';
 import { activateAdminTab, resolveAdminTab } from '../../shared/adminNavigation.js';
 import { cache } from './state.js';
@@ -99,11 +99,17 @@ async function openRequestedAdminDestination(role, loadUsers) {
     activateAdminTab('dashboard', role);
     return;
   }
-  if (role === 'super_admin' && tab === 'requests') await loadControlCenter(loadUsers());
-  if (role === 'super_admin' && tab === 'users') await loadUsers();
   if (!activateAdminTab(tab, role, document, window, { updateUrl: false })) {
     setMessage('error', 'That administrator section is not available.');
     activateAdminTab('dashboard', role);
+    return;
+  }
+  try {
+    if (role === 'super_admin' && tab === 'requests') await loadControlCenter(loadUsers());
+    else if (role === 'super_admin' && tab === 'users') await loadUsers();
+    else await loadAdminSection(tab);
+  } catch (error) {
+    setMessage('error', error.message);
     return;
   }
   const complaintId = params.get('complaint');
