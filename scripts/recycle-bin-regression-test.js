@@ -80,6 +80,8 @@ async function run() {
     assert.ok(dependents.rows.every((row) => row.deleted_at === null));
     assert.equal(relations.rows[0].deleted_at, null);
     assert.equal(relations.rows[0].visible_to_students, false);
+    const restoreAudit = await client.query("SELECT count(*)::int AS count FROM admin_audit_logs WHERE entity = 'faculty' AND entity_id = $1 AND action = 'Restored faculty'", [ids.faculty]);
+    assert.equal(restoreAudit.rows[0].count, 1, 'restoring a recycle-bin cascade is recorded in the audit log');
     await client.query('UPDATE program_courses SET deleted_at = now() WHERE id = $1', [ids.sharedOne]);
   });
 

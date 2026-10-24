@@ -16,10 +16,10 @@ export async function updateActiveProgram(id, data, executor, expectedUpdatedAt)
   return await executor.query(`UPDATE programs SET faculty_id=COALESCE($2,faculty_id),name=COALESCE($3,name),duration_years=COALESCE($4,duration_years),updated_at=now()
     WHERE id=$1 AND deleted_at IS NULL${condition} RETURNING id,faculty_id,name,duration_years,to_char(updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at`, values);
 }
-export async function softDeleteProgramsForFaculty(facultyId, executor) { await executor.query("UPDATE programs SET deleted_at=now(),deleted_by='Admin',delete_reason='Parent faculty deleted',updated_at=now() WHERE faculty_id=$1 AND deleted_at IS NULL", [facultyId]); }
+export async function softDeleteProgramsForFaculty(facultyId, executor, deletedBy = 'Admin') { await executor.query("UPDATE programs SET deleted_at=now(),deleted_by=$2,delete_reason='Parent faculty deleted',updated_at=now() WHERE faculty_id=$1 AND deleted_at IS NULL", [facultyId, deletedBy]); }
 export async function findActiveProgram(id, executor) { return await executor.query('SELECT id,name FROM programs WHERE id=$1 AND deleted_at IS NULL', [id]); }
-export async function softDeleteProgram(id, executor, expectedUpdatedAt) {
+export async function softDeleteProgram(id, executor, expectedUpdatedAt, deletedBy = 'Admin') {
   return expectedUpdatedAt
-    ? executor.query("UPDATE programs SET deleted_at=now(),deleted_by='Admin',delete_reason='Admin delete',updated_at=now() WHERE id=$1 AND deleted_at IS NULL AND updated_at=$2::timestamptz", [id, expectedUpdatedAt])
-    : executor.query("UPDATE programs SET deleted_at=now(),deleted_by='Admin',delete_reason='Admin delete',updated_at=now() WHERE id=$1 AND deleted_at IS NULL", [id]);
+    ? executor.query("UPDATE programs SET deleted_at=now(),deleted_by=$3,delete_reason='Admin delete',updated_at=now() WHERE id=$1 AND deleted_at IS NULL AND updated_at=$2::timestamptz", [id, expectedUpdatedAt, deletedBy])
+    : executor.query("UPDATE programs SET deleted_at=now(),deleted_by=$2,delete_reason='Admin delete',updated_at=now() WHERE id=$1 AND deleted_at IS NULL", [id, deletedBy]);
 }

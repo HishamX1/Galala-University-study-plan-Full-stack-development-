@@ -26,6 +26,12 @@ export function prerequisiteCodes(course) {
     .join(', ');
 }
 
+export function expectedRelationVersion(course) {
+  const updatedAt = course?.version?.updatedAt;
+  if (typeof updatedAt !== 'string' || !updatedAt) throw new Error('Refresh the catalog before changing prerequisite relationships.');
+  return { updatedAt };
+}
+
 export function prerequisiteRelationItems(course) {
   const relations = Array.isArray(course.prerequisiteRelations) && course.prerequisiteRelations.length
     ? course.prerequisiteRelations

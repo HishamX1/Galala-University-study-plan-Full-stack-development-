@@ -38,6 +38,10 @@ function cleanText(value) {
   return text || null;
 }
 
+function deletedBy(actor) {
+  return String(actor?.name || actor?.email || actor?.id || 'Admin').slice(0, 200);
+}
+
 function toInt(value) {
   return Number(value);
 }
@@ -200,12 +204,13 @@ export async function deleteFaculty(id, expectedVersion, actor = null) {
         return false;
       }
       const childCourseIds = (await listActiveFacultyProgramCourseIds(id, client)).map((row) => toInt(row.id));
+      const deleter = deletedBy(actor);
       if (childCourseIds.length) {
-        await softDeletePrerequisitesForCourses(childCourseIds, 'Parent faculty deleted', client);
-        await softDeleteProgramCourses(childCourseIds, 'Parent faculty deleted', client);
+        await softDeletePrerequisitesForCourses(childCourseIds, 'Parent faculty deleted', client, deleter);
+        await softDeleteProgramCourses(childCourseIds, 'Parent faculty deleted', client, deleter);
       }
-      await softDeleteProgramsForFaculty(id, client);
-      const { rowCount } = await softDeleteFaculty(id, client, expectedVersion?.updatedAt);
+      await softDeleteProgramsForFaculty(id, client, deleter);
+      const { rowCount } = await softDeleteFaculty(id, client, expectedVersion?.updatedAt, deleter);
       if (!rowCount) {
         await client.query('ROLLBACK');
         if (expectedVersion && (await findActiveFaculty(id, client)).rowCount) throw staleWrite();
@@ -299,11 +304,12 @@ export async function deleteProgram(id, expectedVersion, actor = null) {
       }
       const programCourses = await listActiveProgramCourseSummaries(id, client);
       const programCourseIds = programCourses.rows.map((row) => toInt(row.id));
+      const deleter = deletedBy(actor);
       if (programCourseIds.length) {
-        await softDeletePrerequisitesForCourses(programCourseIds, 'Parent program deleted', client);
-        await softDeleteProgramCourses(programCourseIds, 'Parent program deleted', client);
+        await softDeletePrerequisitesForCourses(programCourseIds, 'Parent program deleted', client, deleter);
+        await softDeleteProgramCourses(programCourseIds, 'Parent program deleted', client, deleter);
       }
-      const { rowCount } = await softDeleteProgram(id, client, expectedVersion?.updatedAt);
+      const { rowCount } = await softDeleteProgram(id, client, expectedVersion?.updatedAt, deleter);
       if (!rowCount) {
         await client.query('ROLLBACK');
         if (expectedVersion && (await findActiveProgram(id, client)).rowCount) throw staleWrite();
@@ -438,8 +444,9 @@ export async function deleteProgramCourse(id, expectedVersion, actor = null) {
         await client.query('ROLLBACK');
         return false;
       }
-      await softDeletePrerequisitesForCourses([id], 'Related course deleted', client);
-      const { rowCount } = await softDeleteProgramCourse(id, client, expectedVersion?.updatedAt);
+      const deleter = deletedBy(actor);
+      await softDeletePrerequisitesForCourses([id], 'Related course deleted', client, deleter);
+      const { rowCount } = await softDeleteProgramCourse(id, client, expectedVersion?.updatedAt, deleter);
       if (!rowCount) {
         await client.query('ROLLBACK');
         if (expectedVersion && (await findActiveProgramCourseSummary(id, client)).rowCount) throw staleWrite();
@@ -512,7 +519,7 @@ export async function deletePrerequisiteRelation(programCourseId, prerequisiteCo
     try {
       const touched = await touchProgramCourse(programCourseId, client, expectedUpdatedAt);
       if (!touched.rowCount && expectedUpdatedAt && await programCourseExists(programCourseId, client)) throw staleWrite();
-      const { rows, rowCount } = await softDeletePrerequisiteRow(programCourseId, prerequisiteCourseId, client);
+      const { rows, rowCount } = await softDeletePrerequisiteRow(programCourseId, prerequisiteCourseId, client, deletedBy(actor));
       if (!rowCount) {
         await client.query('ROLLBACK');
         return false;

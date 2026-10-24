@@ -28,11 +28,11 @@ export async function touchProgramCourse(id, executor, expectedUpdatedAt) {
     ? executor.query('UPDATE program_courses SET updated_at=now() WHERE id=$1 AND deleted_at IS NULL AND updated_at=$2::timestamptz RETURNING id,updated_at', [id, expectedUpdatedAt])
     : executor.query('UPDATE program_courses SET updated_at=now() WHERE id=$1 AND deleted_at IS NULL RETURNING id,updated_at', [id]);
 }
-export async function softDeleteProgramCourses(ids, reason, executor) { await executor.query("UPDATE program_courses SET deleted_at=now(),deleted_by='Admin',delete_reason=$2,updated_at=now() WHERE id=ANY($1::bigint[])", [ids, reason]); }
+export async function softDeleteProgramCourses(ids, reason, executor, deletedBy = 'Admin') { await executor.query('UPDATE program_courses SET deleted_at=now(),deleted_by=$3,delete_reason=$2,updated_at=now() WHERE id=ANY($1::bigint[]) AND deleted_at IS NULL', [ids, reason, deletedBy]); }
 export async function listActiveProgramCourseSummaries(programId, executor) { return await executor.query('SELECT pc.id,pc.course_id,pc.code,c.name FROM program_courses pc JOIN courses c ON c.id=pc.course_id WHERE pc.program_id=$1 AND pc.deleted_at IS NULL ORDER BY pc.code', [programId]); }
 export async function findActiveProgramCourseSummary(id, executor) { return await executor.query('SELECT pc.id,pc.course_id,pc.code,c.name FROM program_courses pc JOIN courses c ON c.id=pc.course_id WHERE pc.id=$1 AND pc.deleted_at IS NULL', [id]); }
-export async function softDeleteProgramCourse(id, executor, expectedUpdatedAt) {
+export async function softDeleteProgramCourse(id, executor, expectedUpdatedAt, deletedBy = 'Admin') {
   return expectedUpdatedAt
-    ? executor.query("UPDATE program_courses SET deleted_at=now(),deleted_by='Admin',delete_reason='Admin delete',updated_at=now() WHERE id=$1 AND deleted_at IS NULL AND updated_at=$2::timestamptz", [id, expectedUpdatedAt])
-    : executor.query("UPDATE program_courses SET deleted_at=now(),deleted_by='Admin',delete_reason='Admin delete',updated_at=now() WHERE id=$1 AND deleted_at IS NULL", [id]);
+    ? executor.query("UPDATE program_courses SET deleted_at=now(),deleted_by=$3,delete_reason='Admin delete',updated_at=now() WHERE id=$1 AND deleted_at IS NULL AND updated_at=$2::timestamptz", [id, expectedUpdatedAt, deletedBy])
+    : executor.query("UPDATE program_courses SET deleted_at=now(),deleted_by=$2,delete_reason='Admin delete',updated_at=now() WHERE id=$1 AND deleted_at IS NULL", [id, deletedBy]);
 }
