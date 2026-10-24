@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-globalThis.document = { getElementById: () => null };
-const { withButtonBusy } = await import('../frontend/admin/modules/adminDom.js');
+const fakeElements = new Map();
+globalThis.document = { getElementById: (id) => fakeElements.get(id) || null };
+const { withButtonBusy, withAdminLoading } = await import('../frontend/admin/modules/adminDom.js');
 
 const html = fs.readFileSync(new URL('../frontend/admin/index.html', import.meta.url), 'utf8');
 const css = fs.readFileSync(new URL('../frontend/admin/admin.css', import.meta.url), 'utf8');
@@ -49,6 +50,19 @@ busyButton.disabled = true;
 assert.equal(await withButtonBusy(busyButton, async () => 'should not run'), undefined, 'disabled controls cannot submit a duplicate action');
 busyButton.disabled = false;
 
+const loadingOverlay = { hidden: true };
+const loadingLabel = { textContent: '' };
+fakeElements.set('adminLoadingOverlay', loadingOverlay);
+fakeElements.set('adminLoadingMessage', loadingLabel);
+await assert.rejects(withAdminLoading('Loading test page', () => {
+  assert.equal(loadingOverlay.hidden, false, 'the overlay is visible while work is in progress');
+  return new Promise(() => {});
+}, 5), /taking too long to load/i);
+assert.equal(loadingOverlay.hidden, true, 'the full-screen loading overlay is released after the loading deadline');
+assert.equal(loadingLabel.textContent, 'Loading test page');
+await withAdminLoading('Loading completed section', async () => 'done', 5);
+assert.equal(loadingOverlay.hidden, true, 'the full-screen overlay hides after successful completion');
+
 const tabs = [...html.matchAll(/<button([^>]*)role="tab"([^>]*)>([\s\S]*?)<\/button>/g)].map(([, before, after, content]) => {
   const attributes = `${before} ${after}`;
   return [attributes.match(/data-admin-tab="([^"]+)"/)?.[1], attributes.match(/aria-controls="([^"]+)"/)?.[1], content];
@@ -90,7 +104,9 @@ assert.match(adminDom, /setAttribute\('aria-busy', 'true'\)/);
 assert.match(adminDom, /elements\.progress\.hidden = type !== 'progress'/);
 assert.match(adminDom, /showAdminError\(message, remembered\)/, 'admin action failures open the central error dialog');
 assert.match(adminDom, /Date\.now\(\) - lastErrorTime < 3000/, 'duplicate errors are suppressed briefly');
-assert.match(adminDom, /finally \{ adminLoadingCount = Math\.max\(0, adminLoadingCount - 1\); overlay\.hidden = adminLoadingCount > 0; \}/, 'branded loading UI is cleaned up after success and failure');
+assert.match(adminDom, /overlay\.hidden = adminLoadingCount === 0/, 'branded loading UI hides when all work has completed');
+assert.match(adminDom, /ADMIN_LOADING_TIMEOUT_MS = 20_000/, 'the full-screen loading state has a bounded wait');
+assert.match(auth, /await withAdminLoading\('Loading the academic catalog and dashboard/, 'initial admin data loading is awaited and its failure is handled');
 assert.match(html, /id="adminErrorDialog"[^>]*aria-labelledby=/);
 assert.match(html, /id="adminErrorRequestId"/);
 assert.match(html, /data-admin-error-report/);

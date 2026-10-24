@@ -149,13 +149,27 @@ export async function withButtonBusy(button, operation) {
 }
 
 let adminLoadingCount = 0;
-export async function withAdminLoading(message, operation) {
+const ADMIN_LOADING_TIMEOUT_MS = 20_000;
+export async function withAdminLoading(message, operation, timeoutMs = ADMIN_LOADING_TIMEOUT_MS) {
   const overlay = document.getElementById('adminLoadingOverlay');
   const label = document.getElementById('adminLoadingMessage');
   if (!overlay) return operation();
-  label.textContent = message;
+  if (label) label.textContent = message;
   adminLoadingCount += 1;
   overlay.hidden = false;
-  try { return await operation(); }
-  finally { adminLoadingCount = Math.max(0, adminLoadingCount - 1); overlay.hidden = adminLoadingCount > 0; }
+  let timeoutId;
+  try {
+    const timeout = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        const error = new Error('This page is taking too long to load. The API may be unavailable. You can continue using the page and retry the section.');
+        error.code = 'ADMIN_LOADING_TIMEOUT';
+        reject(error);
+      }, timeoutMs);
+    });
+    return await Promise.race([Promise.resolve().then(operation), timeout]);
+  } finally {
+    clearTimeout(timeoutId);
+    adminLoadingCount = Math.max(0, adminLoadingCount - 1);
+    overlay.hidden = adminLoadingCount === 0;
+  }
 }
