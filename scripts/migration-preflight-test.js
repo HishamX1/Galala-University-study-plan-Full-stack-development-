@@ -18,9 +18,13 @@ assert.deepEqual(compareMigrationVersions(['20260420120000'], ['20260420120000',
   unexpected: ['20260901000000']
 });
 const repositoryMigrations = loadRequiredMigrations();
-assert.equal(repositoryMigrations.length, 15, 'the complete canonical migration chain should be discovered');
-assert.equal(repositoryMigrations.at(-1).version, '20261024090000');
-assert.equal(repositoryMigrations.at(-1).filename, '20261024090000_catalog_revision_cache.sql');
+assert.equal(repositoryMigrations.length, 16, 'the complete canonical migration chain should be discovered');
+assert.equal(repositoryMigrations.at(-1).version, '20261024120000');
+assert.equal(repositoryMigrations.at(-1).filename, '20261024120000_admin_error_reports.sql');
+const errorReportMigration = fs.readFileSync(new URL('../supabase/migrations/20261024120000_admin_error_reports.sql', import.meta.url), 'utf8');
+assert.match(errorReportMigration, /ENABLE ROW LEVEL SECURITY/);
+assert.match(errorReportMigration, /FORCE ROW LEVEL SECURITY/);
+assert.doesNotMatch(errorReportMigration, /CREATE POLICY/);
 const supportIndexMigration = fs.readFileSync(new URL('../supabase/migrations/20261022160000_support_list_order_indexes.sql', import.meta.url), 'utf8');
 assert.match(supportIndexMigration, /idx_student_complaints_created_id/);
 assert.match(supportIndexMigration, /idx_communication_outbox_created_id/);

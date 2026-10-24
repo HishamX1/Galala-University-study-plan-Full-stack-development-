@@ -13,33 +13,27 @@ form.addEventListener('submit', async (event) => {
   submitButton.disabled = true;
   try {
     const email = String(new FormData(form).get('email') || '').trim();
-    let lastNetworkError = null;
-    for (const base of getApiCandidates()) {
-      let response;
-      try {
-        response = await fetch(`${base}/auth/student-password-reset-requests`, {
+    const base = getApiCandidates()[0];
+    if (!base) throw new Error('The service is not configured. Please try again later.');
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    try {
+        const response = await fetch(`${base}/auth/student-password-reset-requests`, {
           method: 'POST',
           credentials: 'omit',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ email })
+          body: JSON.stringify({ email }), signal: controller.signal
         });
-      } catch (error) {
-        lastNetworkError = error;
-        continue;
-      }
-
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'Unable to process the request. Please try again later.');
       saveApiBase(base);
       message.textContent = data.message || genericResponse;
       form.reset();
-      return;
-    }
-    throw new Error(lastNetworkError ? 'The service is temporarily unavailable. Please try again later.' : 'Unable to process the request. Please try again later.');
+    } finally { clearTimeout(timeout); }
   } catch (error) {
     message.classList.remove('status');
     message.classList.add('error');
-    message.textContent = error.message;
+    message.textContent = error.name === 'AbortError' ? 'The service timed out. Please check your connection before trying again.' : error instanceof TypeError ? 'The service is temporarily unavailable. Please try again later.' : error.message;
   } finally {
     submitButton.disabled = false;
   }

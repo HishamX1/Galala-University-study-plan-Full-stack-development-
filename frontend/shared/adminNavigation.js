@@ -28,7 +28,7 @@ export function adminTabHref(tab, adminIndexHref = './admin/index.html') {
 
 export function adminQuickAccessActions(role, adminIndexHref = './admin/index.html', studentPortalHref = './student/index.html') {
   if (role === 'regular_admin') return [
-    ['Course Manager', adminTabHref('catalog', adminIndexHref)],
+    ['Academic Catalog', adminTabHref('catalog', adminIndexHref)],
     ['Add Course', adminTabHref('catalog', adminIndexHref)],
     ['Manage Relations', adminTabHref('catalog', adminIndexHref)],
     ['Import', adminTabHref('transfer', adminIndexHref)],
@@ -36,6 +36,7 @@ export function adminQuickAccessActions(role, adminIndexHref = './admin/index.ht
     ['Faculty Management', adminTabHref('catalog', adminIndexHref)]
   ];
   if (role === 'super_admin') return [
+    ['Academic Catalog', adminTabHref('catalog', adminIndexHref)],
     ['User Management', adminTabHref('users', adminIndexHref)],
     ['Requests & Complaints', adminTabHref('requests', adminIndexHref)],
     ['Audit Logs', adminTabHref('audit', adminIndexHref)],

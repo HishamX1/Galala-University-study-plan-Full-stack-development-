@@ -11,6 +11,7 @@ import { handleCatalogReadRequest, handleCatalogRequest } from '../controllers/c
 import { handleDashboardRequest } from '../controllers/dashboardController.js';
 import { handleAdminSupportRequest, handleAdminUserRequest } from '../controllers/adminUserController.js';
 import { handleAdminOperationsRequest } from '../controllers/adminOperationsController.js';
+import { handleErrorReportRequest } from '../controllers/errorReportController.js';
 
 function isAllowedCorsOrigin(origin) {
   return Boolean(origin) && env.corsOrigins.includes(origin);
@@ -21,9 +22,9 @@ function applyCorsHeaders(req, res) {
   if (!isAllowedCorsOrigin(origin)) return false;
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, X-Request-ID');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Type');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Type, X-Request-ID');
   res.setHeader('Vary', 'Origin');
   return true;
 }
@@ -63,6 +64,7 @@ export async function handleApi(req, res, url, { resolveCurrentUser = currentUse
   }
   if (req.method === 'OPTIONS') return json(res, 204, {});
   if (!trustedStateChange(req)) return json(res, 403, { error: 'Origin validation failed' });
+  if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/status`) return json(res, 200, { status: 'ok' });
 
   const studentResetRequestPath = `${env.apiBasePath}/auth/student-password-reset-requests`;
   const authSensitive = [`${env.apiBasePath}/auth/login`, `${env.apiBasePath}/auth/student-login`, `${env.apiBasePath}/auth/admin-login`, `${env.apiBasePath}/auth/password-reset-requests`, studentResetRequestPath];
@@ -75,6 +77,8 @@ export async function handleApi(req, res, url, { resolveCurrentUser = currentUse
   if (req.method === 'POST' && authSensitive.includes(url.pathname)) {
     if (!allowRequest(`${url.pathname}:${client}`, { limit: 10, windowMs: 60_000 })) return rateLimitResponse();
   }
+  if (req.method === 'POST' && url.pathname === `${env.apiBasePath}/admin/error-reports`
+    && !allowRequest(`error-report:${client}`, { limit: 5, windowMs: 15 * 60_000 })) return rateLimitResponse('900');
   if (req.method === 'POST' && url.pathname === studentResetRequestPath
     && !allowRequest(`${url.pathname}:ip:${client}`, { limit: 5, windowMs: 15 * 60_000 })) {
     return rateLimitResponse('900');
@@ -85,6 +89,14 @@ export async function handleApi(req, res, url, { resolveCurrentUser = currentUse
 
     const user = await resolveCurrentUser(req);
     if (!user) return unauthorized(res);
+    const errorReportsPath = `${env.apiBasePath}/admin/error-reports`;
+    if (url.pathname === errorReportsPath || url.pathname.startsWith(`${errorReportsPath}/`)) {
+      const permission = req.method === 'POST' && url.pathname === errorReportsPath
+        ? Permissions.errorReportCreate
+        : req.method === 'GET' ? Permissions.errorReportsRead : Permissions.errorReportsManage;
+      if (!requirePermission(res, user, permission)) return;
+      return handleErrorReportRequest(req, res, url, user);
+    }
     if (req.method === 'GET' && url.pathname === `${env.apiBasePath}/dashboard`) {
       if (!requirePermission(res, user, Permissions.dashboardRead)) return;
       return handleDashboardRequest(req, res, url, user);

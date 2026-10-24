@@ -16,19 +16,28 @@ document.getElementById('toggle-passwords')?.addEventListener('change', (event) 
 
 form?.addEventListener('submit', async (event) => {
   event.preventDefault(); error.textContent = '';
+  const submit = form.querySelector('[type="submit"]');
+  if (submit?.disabled) return;
+  const originalLabel = submit?.textContent || '';
+  if (submit) { submit.disabled = true; submit.setAttribute('aria-busy', 'true'); submit.textContent = mode === 'signup' ? 'Creating account…' : 'Signing in…'; }
+  if (status) { status.hidden = false; status.textContent = mode === 'signup' ? 'Creating your account…' : 'Checking your account…'; }
   const values = Object.fromEntries(new FormData(form));
   const endpoint = mode === 'signup' ? '/auth/student-signup' : `/auth/${mode}-login`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
   try {
-    let lastError;
-    for (const base of getApiCandidates()) {
-      try {
-        const response = await fetch(`${base}${endpoint}`, { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body:JSON.stringify(values) });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Unable to sign in.');
-        saveApiBase(base);
-        location.assign('./dashboard.html'); return;
-      } catch (cause) { lastError = cause; }
-    }
-    throw lastError || new Error('The service is unavailable.');
-  } catch (cause) { error.textContent = cause.message; }
+    const base = getApiCandidates()[0];
+    if (!base) throw new Error('The API is not configured.');
+    const response = await fetch(`${base}${endpoint}`, { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body:JSON.stringify(values), signal:controller.signal });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) { const cause = new Error(data.error || 'Unable to sign in.'); cause.status = response.status; cause.code = data.code; cause.requestId = data.requestId || response.headers.get('x-request-id'); throw cause; }
+    saveApiBase(base);
+    location.assign('./dashboard.html');
+  } catch (cause) {
+    error.textContent = controller.signal.aborted ? 'The sign-in request timed out. Check your connection and try again.' : cause instanceof TypeError ? 'Could not reach the API. Check your connection or service availability.' : cause.message;
+    if (status) { status.hidden = true; status.textContent = ''; }
+  } finally {
+    clearTimeout(timeout);
+    if (submit) { submit.disabled = false; submit.removeAttribute('aria-busy'); submit.textContent = originalLabel; }
+  }
 });

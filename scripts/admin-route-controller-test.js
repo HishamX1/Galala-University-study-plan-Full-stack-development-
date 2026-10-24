@@ -191,6 +191,28 @@ await handleApi(request('OPTIONS', `${env.apiBasePath}/admin/users`), options,
 assert.equal(options.statusCode, 204);
 assert.equal(currentUserCalls, 1, 'preflight must finish before authentication');
 
+const corsPreflightRequest = request('OPTIONS', `${env.apiBasePath}/admin/error-reports`);
+corsPreflightRequest.headers.origin = 'http://localhost:5500';
+corsPreflightRequest.headers['access-control-request-method'] = 'POST';
+corsPreflightRequest.headers['access-control-request-headers'] = 'content-type,x-request-id';
+const corsPreflight = response();
+await handleApi(corsPreflightRequest, corsPreflight, new URL(`${env.apiBasePath}/admin/error-reports`, 'http://localhost'));
+assert.equal(corsPreflight.statusCode, 204);
+assert.equal(corsPreflight.headers['Access-Control-Allow-Origin'], 'http://localhost:5500');
+assert.equal(corsPreflight.headers['Access-Control-Allow-Credentials'], 'true');
+assert.match(corsPreflight.headers['Access-Control-Allow-Headers'], /X-Request-ID/i);
+assert.match(corsPreflight.headers['Access-Control-Allow-Methods'], /DELETE/);
+
+for (const role of ['student', 'regular_admin']) {
+  const deniedReportInbox = response();
+  const handled = await handleApi(request('GET', `${env.apiBasePath}/admin/error-reports`), deniedReportInbox,
+    new URL(`${env.apiBasePath}/admin/error-reports`, 'http://localhost'), {
+      resolveCurrentUser: async () => ({ id: 'user-1', role })
+    });
+  assert.equal(handled, undefined, `${role} cannot reach the private report inbox`);
+  assert.equal(deniedReportInbox.statusCode, 403);
+}
+
 const originDenied = response();
 const badOriginRequest = request('GET', `${env.apiBasePath}/admin/users`);
 badOriginRequest.headers.origin = 'https://untrusted.invalid';
@@ -208,5 +230,11 @@ await handleApi(request('POST', `${env.apiBasePath}/admin/users`, JSON.stringify
 assert.equal(adminValidation.statusCode, 400);
 assert.equal(adminValidation.writeHeadCalls, 1, 'controller-handled admin response must stop route dispatch');
 assert.deepEqual(JSON.parse(adminValidation.body), { error: 'Name, email, password, and a valid role are required' });
+
+const publicStatus = response();
+assert.notEqual(await handleApi(request('GET', `${env.apiBasePath}/status`), publicStatus,
+  new URL(`${env.apiBasePath}/status`, 'http://localhost')), false, 'the minimal service status endpoint is available without credentials');
+assert.equal(publicStatus.statusCode, 200);
+assert.deepEqual(JSON.parse(publicStatus.body), { status: 'ok' }, 'the status response contains no infrastructure details');
 
 console.log('Admin route/controller compatibility tests passed.');

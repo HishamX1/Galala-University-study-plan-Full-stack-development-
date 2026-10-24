@@ -98,6 +98,8 @@
       <p class="error" id="authError" role="alert" aria-live="assertive"></p>
       <label for="apiBaseUrl">Live API Base URL</label>
       <input id="apiBaseUrl" placeholder="https://your-backend.example.com/api" />
+      <button type="button" class="secondary" id="testApiConnection">Test API connection</button>
+      <p id="apiConnectionStatus" role="status" aria-live="polite"></p>
       <div class="grid">
         <div><label for="adminUsername">Email or Student ID</label><input id="adminUsername" autocomplete="username" /></div>
         <div><label for="adminPassword">Password</label><input id="adminPassword" type="password" autocomplete="current-password" /></div>
@@ -291,6 +293,11 @@
         <section class="admin-data-section"><h4>Password-reset requests</h4><p>Approve or reject requests. Approved one-time links are shown once and must go only to the registered address.</p><div class="table-wrap" role="region" aria-label="Password-reset requests" tabindex="0"><table><thead><tr><th>Account</th><th>Role</th><th>Status</th><th>Requested</th><th>Reviewed by / at</th><th>Action</th></tr></thead><tbody id="resetRequestList"></tbody></table></div></section>
         <section class="admin-data-section"><h4>Student complaints &amp; access issues</h4><p>Review the submitter, assignment history, status, and latest administrator action. Use the page controls to browse the complete history.</p><div class="table-wrap" role="region" aria-label="Student complaints and access issues" tabindex="0"><table><thead><tr><th>Submitter</th><th>Message</th><th>Status</th><th>Assignment</th><th>Last modified</th><th>Details / action</th></tr></thead><tbody id="complaintList"></tbody></table></div><nav id="complaintsPagination" class="support-pagination" aria-label="Complaint pages" aria-live="polite"></nav></section>
         <section class="admin-data-section"><h4>Communication log</h4><p>Check messages queued for delivery and their current status. Use the page controls to browse the complete history.</p><div class="table-wrap" role="region" aria-label="Communication delivery log" tabindex="0"><table><thead><tr><th>Recipient</th><th>Subject</th><th>Status</th><th>Created</th></tr></thead><tbody id="communicationList"></tbody></table></div><nav id="communicationsPagination" class="support-pagination" aria-label="Communication pages" aria-live="polite"></nav></section>
+        <section class="admin-data-section" id="errorReportInbox"><h4>Administrator error reports</h4><p>Review reports submitted by administrators and record resolution notes.</p>
+          <div class="grid admin-filter-grid"><div><label for="errorReportStatus">Filter by status</label><select id="errorReportStatus"><option value="">All statuses</option><option value="new">New</option><option value="reviewing">Reviewing</option><option value="resolved">Resolved</option></select></div><div><label for="errorReportCategory">Filter by category</label><select id="errorReportCategory"><option value="">All categories</option><option value="api">API</option><option value="authentication">Authentication</option><option value="catalog">Catalog</option><option value="import">Import</option><option value="network">Network</option><option value="ui">User interface</option><option value="other">Other</option></select></div></div>
+          <div class="table-wrap" role="region" aria-label="Administrator error reports" tabindex="0"><table><thead><tr><th>Reported</th><th>Reporter</th><th>Category / severity</th><th>Message</th><th>Request ID</th><th>Status / action</th></tr></thead><tbody id="errorReportList"></tbody></table></div><nav id="errorReportsPagination" class="support-pagination" aria-label="Error report pages" aria-live="polite"></nav>
+          <dialog id="errorReportDetailDialog" class="complaint-detail-dialog" aria-labelledby="errorReportDetailTitle"><header class="dialog-header"><h2 id="errorReportDetailTitle">Error report</h2><button type="button" data-error-report-close>Close</button></header><div id="errorReportDetailContent"></div></dialog>
+        </section>
       </div>
     </section>
   </main>
@@ -300,6 +307,12 @@
     <header class="dialog-header"><h2 id="complaintDetailTitle">Complaint details</h2><button type="button" id="complaintDetailClose">Close</button></header>
     <div id="complaintDetailContent" aria-live="polite"></div>
   </dialog>
+  <dialog id="adminErrorDialog" class="complaint-detail-dialog" aria-labelledby="adminErrorTitle" aria-describedby="adminErrorMessage">
+    <header class="dialog-header"><h2 id="adminErrorTitle">We could not complete that action</h2><button type="button" data-admin-error-close>Close</button></header>
+    <p id="adminErrorMessage" role="alert" aria-live="assertive"></p><dl><dt>Operation</dt><dd id="adminErrorOperation"></dd><dt>Status / code</dt><dd id="adminErrorCode"></dd><dt>Request ID</dt><dd id="adminErrorRequestId"></dd><dt>Time</dt><dd id="adminErrorTimestamp"></dd><dt>Endpoint</dt><dd id="adminErrorEndpoint"></dd></dl>
+    <details><summary>Technical details</summary><pre id="adminErrorTechnicalDetails"></pre></details><p id="adminErrorReportResult" role="status" aria-live="polite"></p><button type="button" data-admin-error-report>Send error report to Super Admin</button>
+  </dialog>
+  <div id="adminLoadingOverlay" class="admin-loading-overlay" role="status" aria-live="polite" aria-busy="true" hidden><img src="../images/GU-Logo-Color-Original.png" alt="" /><span id="adminLoadingMessage">Loading your workspace…</span><span class="admin-loading-spinner" aria-hidden="true"></span></div>
   <div class="dialog-backdrop" id="adminDialogBackdrop" hidden>
     <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="adminDialogTitle" aria-describedby="adminDialogDescription">
       <form id="adminDialogForm">
@@ -322,7 +335,7 @@
     <p>Admin Control Panel - Academic Affairs</p>
   </footer>
 
-  <script src="../config.js"></script>
+  <script type="module" src="../config.js"></script>
   <script type="module" src="./admin.js"></script>
 </body>
 </html>

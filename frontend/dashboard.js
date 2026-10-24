@@ -7,12 +7,34 @@ const labels = { student: 'Student', regular_admin: 'Academic Administrator', su
 const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[c]));
 const date = value => value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : 'Not available';
 let user = await restoreSession();
-if (!user) location.replace('./index.html');
+if (user?.unavailable) {
+  document.body.innerHTML = '<main role="alert" class="auth-unavailable"><h1>Dashboard temporarily unavailable</h1><p>Your session could not be verified because the API is unreachable. Reconnect and reload. No authentication decision has been made.</p><button type="button" onclick="location.reload()">Try again</button></main>';
+  throw new Error('Session verification unavailable.');
+}
+if (!user) { location.replace('./index.html'); throw new Error('Dashboard session is not valid.'); }
 let dashboardData;
 
 async function api(path, options = {}) {
   let lastError;
-  for (const base of getApiCandidates()) try { const response = await fetch(`${base}${path}`, { credentials: 'include', headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options }); const data = response.status === 204 ? null : await response.json(); if (!response.ok) throw new Error(data?.error || 'Request failed.'); saveApiBase(base); return data; } catch (error) { lastError = error; }
+  const method = String(options.method || 'GET').toUpperCase();
+  const safeToTryAnotherBase = ['GET', 'HEAD', 'OPTIONS'].includes(method);
+  for (const base of getApiCandidates()) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const response = await fetch(`${base}${path}`, { credentials: 'include', headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options, signal: controller.signal });
+      const data = response.status === 204 ? null : await response.json().catch(() => ({}));
+      if (!response.ok) { const error = new Error(data?.error || 'Request failed.'); error.status = response.status; error.code = data?.code; error.requestId = data?.requestId || response.headers.get('x-request-id'); throw error; }
+      saveApiBase(base);
+      return data;
+    } catch (error) {
+      lastError = error;
+      if (!safeToTryAnotherBase || error.status || controller.signal.aborted) {
+        if (controller.signal.aborted) { error.code = 'REQUEST_TIMEOUT'; error.message = `${method} request timed out. Check your connection before trying again.`; }
+        throw error;
+      }
+    } finally { clearTimeout(timeout); }
+  }
   throw lastError;
 }
 function avatar(profile) { return profile.avatarData ? `<img class="avatar custom-image" src="${profile.avatarData}" alt="Custom avatar for ${escapeHtml(profile.name)}">` : `<span class="avatar" aria-label="Selected avatar">${avatars[Number((profile.avatarKey || 'avatar-1').split('-')[1]) - 1] || avatars[0]}</span>`; }
@@ -76,3 +98,4 @@ document.getElementById('remove-avatar').addEventListener('click', async () => {
 async function logout() { await signOut('./index.html'); }
 document.getElementById('sign-out').addEventListener('click', logout);
 try { render(await api('/dashboard')); } catch (error) { document.getElementById('dashboard-content').innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`; }
+finally { const overlay = document.getElementById('dashboardLoadingOverlay'); if (overlay) overlay.hidden = true; }

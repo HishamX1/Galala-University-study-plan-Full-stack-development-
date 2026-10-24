@@ -1,8 +1,10 @@
+import { PRODUCTION_API_BASE } from './shared/apiConfig.js';
+
 // Runtime API configuration for static deployments. This detects local static
-// development automatically, while every deployed hostname uses Render.
+// development automatically; the shared API module owns the production URL.
 const guLocalApiHosts = {
   localhost: 'http://localhost:4000/api',
   '127.0.0.1': 'http://127.0.0.1:4000/api'
 };
 window.__GU_API_BASE__ = guLocalApiHosts[window.location.hostname]
-  || 'https://galala-university-study-plan-full-stack-kd69.onrender.com/api';
+  || PRODUCTION_API_BASE;

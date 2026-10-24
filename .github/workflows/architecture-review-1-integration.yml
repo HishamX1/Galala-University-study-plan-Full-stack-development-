@@ -171,4 +171,5 @@ jobs:
           npm run test:complaint-visibility &&
           npm run test:notification-read &&
           npm run test:password-reset-email &&
-          npm run test:dashboard-db-performance
+          npm run test:dashboard-db-performance &&
+          npm run test:error-reports-db

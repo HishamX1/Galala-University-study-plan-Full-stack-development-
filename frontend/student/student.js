@@ -10,7 +10,14 @@ const apiCandidates = getApiCandidates();
 let workingApiBase = apiCandidates[0] || '/api';
 
 const authenticatedUser = await restoreSession();
-if (!authenticatedUser) location.replace('../student-login.html');
+if (authenticatedUser?.unavailable) {
+  document.body.innerHTML = '<main class="auth-unavailable" role="alert"><h1>Student portal temporarily unavailable</h1><p>Your session could not be verified because the API is unreachable. Reconnect and reload this page. You have not been signed out.</p><button type="button" onclick="location.reload()">Try again</button></main>';
+  throw new Error('Session verification unavailable.');
+}
+if (!authenticatedUser) {
+  location.replace('../student-login.html');
+  throw new Error('Student session is not valid.');
+}
 document.getElementById('student-sign-out')?.addEventListener('click', () => signOut('../index.html'));
 
 const state = {
@@ -75,16 +82,31 @@ const elements = {
 
 let catalogLoadPromise = null;
 let navigationToRestore = null;
+let studentRefreshInFlight = null;
+
+function refreshStudentSession(base, signal) {
+  if (!studentRefreshInFlight) {
+    const pending = fetch(`${base}/auth/refresh`, { method: 'POST', credentials: 'include', headers: { Accept: 'application/json' }, signal })
+      .then(async (response) => ({ response, data: await response.json().catch(() => ({})) }))
+      .finally(() => { if (studentRefreshInFlight === pending) studentRefreshInFlight = null; });
+    studentRefreshInFlight = pending;
+  }
+  return studentRefreshInFlight;
+}
 
 async function fetchJson(path) {
   let lastError = null;
 
   for (const base of [workingApiBase, ...apiCandidates.filter((candidate) => candidate !== workingApiBase)]) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
     try {
-      let res = await fetch(`${base}${path}`, { credentials: 'include', headers: { Accept: 'application/json' } });
+      let res = await fetch(`${base}${path}`, { credentials: 'include', headers: { Accept: 'application/json' }, signal: controller.signal });
       if (res.status === 401) {
-        const refreshed = await fetch(`${base}/auth/refresh`, { method: 'POST', credentials: 'include', headers: { Accept: 'application/json' } });
-        if (refreshed.ok) res = await fetch(`${base}${path}`, { credentials: 'include', headers: { Accept: 'application/json' } });
+        const { response: refreshed } = await refreshStudentSession(base, controller.signal);
+        if (refreshed.status === 401) { window.location.assign('../student-login.html'); const error = new Error('Your session has expired. Please sign in again.'); error.noRetry = true; throw error; }
+        if (!refreshed.ok) { const error = new Error('The authentication service is temporarily unavailable.'); error.status = refreshed.status; error.noRetry = true; throw error; }
+        res = await fetch(`${base}${path}`, { credentials: 'include', headers: { Accept: 'application/json' }, signal: controller.signal });
       }
       if (res.status === 401) {
         window.location.assign('../student-login.html');
@@ -99,16 +121,18 @@ async function fetchJson(path) {
         throw error;
       }
       const contentType = res.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) throw new Error('API did not return JSON');
+      if (!contentType.includes('application/json')) { const error = new Error('API returned an unexpected response.'); error.noRetry = true; throw error; }
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (!res.ok) { const error = new Error(data.error || `HTTP ${res.status}`); error.status = res.status; error.code = data.code; error.requestId = data.requestId || res.headers.get('x-request-id'); error.noRetry = true; throw error; }
       workingApiBase = base;
       saveApiBase(base);
       return data;
     } catch (error) {
       if (error.noRetry) throw error;
+      if (controller.signal.aborted) { const timeoutError = new Error('The API request timed out. Check your connection and try again.'); timeoutError.code = 'REQUEST_TIMEOUT'; timeoutError.noRetry = true; throw timeoutError; }
+      if (error.status) throw error;
       lastError = error;
-    }
+    } finally { clearTimeout(timeout); }
   }
 
   throw new Error(`Unable to reach backend API. (${lastError?.message || 'Unknown error'})`);
@@ -763,7 +787,7 @@ async function loadData({ preserveCurrent = false } = {}) {
 
 function initializeStudentPortal() {
   setupEventListeners();
-  loadData();
+  void loadData().finally(() => { const overlay = document.getElementById('studentLoadingOverlay'); if (overlay) overlay.hidden = true; });
 }
 
 // Session restoration uses top-level await.  Depending on browser timing,

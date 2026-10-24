@@ -12,11 +12,12 @@ assert.deepEqual(resolveAdminTab('not-a-tab', 'super_admin'), { allowed: false, 
 assert.equal(resolveAdminTab('catalog', 'student').allowed, false);
 assert.deepEqual(Object.keys(ADMIN_TAB_ROLES), ['dashboard', 'catalog', 'audit', 'transfer', 'backup', 'recycle', 'health', 'users', 'requests']);
 assert.deepEqual(adminQuickAccessActions('regular_admin', '../admin/index.html'), [
-  ['Course Manager', '../admin/index.html?tab=catalog'], ['Add Course', '../admin/index.html?tab=catalog'],
+  ['Academic Catalog', '../admin/index.html?tab=catalog'], ['Add Course', '../admin/index.html?tab=catalog'],
   ['Manage Relations', '../admin/index.html?tab=catalog'], ['Import', '../admin/index.html?tab=transfer'],
   ['Program Management', '../admin/index.html?tab=catalog'], ['Faculty Management', '../admin/index.html?tab=catalog']
 ]);
 assert.deepEqual(adminQuickAccessActions('super_admin', '../admin/index.html', '../student/index.html'), [
+  ['Academic Catalog', '../admin/index.html?tab=catalog'],
   ['User Management', '../admin/index.html?tab=users'], ['Requests & Complaints', '../admin/index.html?tab=requests'],
   ['Audit Logs', '../admin/index.html?tab=audit'], ['Backup', '../admin/index.html?tab=backup'],
   ['Export', '../admin/index.html?tab=transfer'], ['Recycle Bin', '../admin/index.html?tab=recycle'],
@@ -96,13 +97,13 @@ assert.match(adminAuth, /loadRelations\(\)\.catch\(\(error\) => setMessage\('err
   'catalog loading failure is surfaced without blocking the control panel');
 assert.match(adminAuth, /loadAdminOps\(\)\.catch\(\(error\) => setMessage\('error', `Dashboard operations could not be loaded: \$\{error\.message\}`\)\)/,
   'dashboard operations failure is surfaced without blocking secondary tabs');
-assert.match(adminAuth, /const tasks = \[[\s\S]*?loadRelations\(\)[\s\S]*?loadAdminOps\(\)[\s\S]*?void Promise\.all\(tasks\)/,
+assert.match(adminAuth, /const tasks = \[[\s\S]*?loadRelations\(\)[\s\S]*?loadAdminOps\(\)[\s\S]*?void withAdminLoading\('Loading the academic catalog and dashboard…', \(\) => Promise\.all\(tasks\)\)/,
   'initial catalog and dashboard requests run concurrently without delaying tab or deep-link activation');
 assert.match(adminOps, /export async function loadAdminOps\(\) \{\s*const sections = new Set\(\['dashboard', \.\.\.loadedSections\]\)/,
   'admin operations startup refreshes the dashboard and only previously visited secondary sections');
 assert.match(adminOps, /export async function loadAdminSection\(section, \{ refresh = false \} = \{\}\)[\s\S]*?section === 'audit'[\s\S]*?section === 'recycle'[\s\S]*?section === 'backup'[\s\S]*?section === 'health'[\s\S]*?section === 'transfer'/,
   'audit, recycle bin, backup, health, and import-stage data load on demand');
-assert.match(adminOps, /activateAdminTab\(button\.dataset\.adminTab, cache\.adminRole\);\s*loadAdminSection\(button\.dataset\.adminTab\)/,
+assert.match(adminOps, /activateAdminTab\(button\.dataset\.adminTab, cache\.adminRole\);\s*withAdminLoading\('Loading this administrator section…', \(\) => loadAdminSection\(button\.dataset\.adminTab\)\)/,
   'opening an admin tab starts its data load immediately');
 assert.match(adminOps, /sectionRequestVersions\.set\(section, requestVersion\)[\s\S]*?sectionRequestVersions\.get\(section\) === requestVersion[\s\S]*?sectionRequestVersions\.get\(section\) !== requestVersion/,
   'older tab refresh responses cannot overwrite newer data');
