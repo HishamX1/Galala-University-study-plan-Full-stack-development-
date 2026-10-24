@@ -1,5 +1,5 @@
 import { getWorkingApiBase, request, updateConfiguredApiBase } from './apiClient.js';
-import { elements, setMessage, withButtonBusy } from './adminDom.js';
+import { elements, setMessage, withButtonBusy, withAdminLoading } from './adminDom.js';
 import { openConfirmDialog, openFormDialog } from './dialogs.js';
 import { loadRelations } from './dataLoader.js';
 import { loadAdminOps, loadAdminSection } from './adminOps.js';
@@ -12,6 +12,9 @@ const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => 
 const SUPPORT_PAGE_SIZE = 50;
 let controlCenterLoaded = false;
 let controlCenterRequest = null;
+let errorReportPage = 0;
+let errorReportTotal = 0;
+let errorReportRows = [];
 function renderSupportPage(kind, records, page) {
   const list = document.getElementById(kind === 'complaints' ? 'complaintList' : 'communicationList');
   if (!list) return;
@@ -44,6 +47,33 @@ async function loadSupportPage(kind, pageIndex = cache.supportPages[kind]) {
   renderSupportPage(kind, data[kind], data.page);
 }
 
+const escapeReport = (value) => escapeHtml(value ?? '');
+async function loadErrorReports(pageIndex = errorReportPage) {
+  const status = document.getElementById('errorReportStatus')?.value || '';
+  const category = document.getElementById('errorReportCategory')?.value || '';
+  const limit = 25;
+  const offset = Math.max(0, pageIndex) * limit;
+  const query = new URLSearchParams({ limit, offset });
+  if (status) query.set('status', status);
+  if (category) query.set('category', category);
+  const { reports, page } = await request(`/admin/error-reports?${query}`);
+  errorReportPage = pageIndex;
+  errorReportTotal = page.total;
+  errorReportRows = reports;
+  const list = document.getElementById('errorReportList');
+  if (list) list.innerHTML = reports.map((report, index) => `<tr data-error-report-index="${index}"><td>${escapeReport(new Date(report.created_at).toLocaleString())}</td><td>${escapeReport(report.reporter_name || 'Administrator')}<small>${escapeReport(report.reporter_email || report.reporter_id)} · ${escapeReport(report.reporter_role.replace('_', ' '))}</small></td><td>${escapeReport(report.category)} / ${escapeReport(report.severity)}</td><td>${escapeReport(report.message)}</td><td>${escapeReport(report.request_id || '—')}</td><td>${escapeReport(report.status)} <button type="button" data-error-report-view="${index}">Details</button>${report.status !== 'resolved' ? ` <button type="button" data-error-report-status="${index}">Acknowledge / resolve</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="6">No administrator error reports.</td></tr>';
+  const nav = document.getElementById('errorReportsPagination');
+  if (nav) nav.innerHTML = `<button type="button" data-error-report-page="previous" ${pageIndex === 0 ? 'disabled' : ''}>Previous</button><span>Page ${pageIndex + 1} · ${page.total} reports</span><button type="button" data-error-report-page="next" ${offset + limit >= page.total ? 'disabled' : ''}>Next</button>`;
+}
+
+function showErrorReportDetail(report) {
+  const detail = document.getElementById('errorReportDetailContent');
+  const technical = JSON.stringify(report.technical_details || {}, null, 2);
+  detail.innerHTML = `<dl><dt>Reported</dt><dd>${escapeReport(new Date(report.created_at).toLocaleString())}</dd><dt>Reporter</dt><dd>${escapeReport(report.reporter_name || 'Administrator')} · ${escapeReport(report.reporter_email || report.reporter_id)} · ${escapeReport(report.reporter_role.replace('_', ' '))}</dd><dt>Category / severity</dt><dd>${escapeReport(report.category)} / ${escapeReport(report.severity)}</dd><dt>Request ID</dt><dd>${escapeReport(report.request_id || 'Not recorded')}</dd><dt>Page / endpoint</dt><dd>${escapeReport(report.page)} · ${escapeReport(report.method || '')} ${escapeReport(report.endpoint)}</dd><dt>Status</dt><dd>${escapeReport(report.status)}</dd><dt>Last updated</dt><dd>${escapeReport(new Date(report.updated_at).toLocaleString())}</dd><dt>Resolved by / at</dt><dd>${escapeReport(report.resolved_by_name || 'Not resolved')} · ${escapeReport(report.resolved_at ? new Date(report.resolved_at).toLocaleString() : '')}</dd><dt>Resolution notes</dt><dd>${escapeReport(report.resolution_notes || 'None')}</dd></dl><p class="complaint-message">${escapeReport(report.message)}</p><details open><summary>Technical details</summary><pre>${escapeReport(technical)}</pre><button type="button" data-error-report-copy>Copy technical details</button></details>`;
+  const dialog = document.getElementById('errorReportDetailDialog');
+  if (!dialog.open) dialog.showModal();
+}
+
 async function renderControlCenter(adminUsersPromise = null) {
   const userDataPromise = adminUsersPromise || (cache.complaintAdmins.length ? Promise.resolve(null) : request('/admin/users'));
   const complaintRequestVersion = ++cache.supportPageRequests.complaints;
@@ -62,6 +92,7 @@ async function renderControlCenter(adminUsersPromise = null) {
     cache.supportPageData.communications = communicationData.page;
     renderSupportPage('communications', communicationData.communications, communicationData.page);
   }
+  await loadErrorReports(0);
 }
 
 async function loadControlCenter(adminUsersPromise = null, { refresh = false } = {}) {
@@ -128,10 +159,24 @@ export function setupLogin() {
   if (elements.apiBaseInput) {
     elements.apiBaseInput.value = getWorkingApiBase() || '';
     elements.apiBaseInput.addEventListener('change', () => {
-      updateConfiguredApiBase(elements.apiBaseInput.value);
-      elements.apiBaseInput.value = getWorkingApiBase();
+      try {
+        updateConfiguredApiBase(elements.apiBaseInput.value);
+        elements.apiBaseInput.value = getWorkingApiBase();
+        document.getElementById('apiConnectionStatus').textContent = 'Temporary API override is active for this page.';
+      } catch (error) { document.getElementById('apiConnectionStatus').textContent = error.message; }
     });
   }
+
+  document.getElementById('testApiConnection')?.addEventListener('click', async (event) => {
+    const status = document.getElementById('apiConnectionStatus');
+    await withButtonBusy(event.currentTarget, async () => {
+      status.textContent = 'Checking API connection…';
+      try {
+        const result = await request('/status');
+        status.textContent = `API reachable (${result.status}). No credentials or server configuration were exposed.`;
+      } catch (error) { status.textContent = `API connection failed (${error.code || 'CONNECTION_ERROR'}). Check the URL, CORS allowlist, CSP, and service status.`; }
+    });
+  });
 
   const onLogin = async () => {
     elements.authError.textContent = '';
@@ -206,7 +251,7 @@ export function setupLogin() {
       loadRelations().catch((error) => setMessage('error', `Catalog could not be loaded: ${error.message}`)),
       loadAdminOps().catch((error) => setMessage('error', `Dashboard operations could not be loaded: ${error.message}`))
     ];
-    void Promise.all(tasks);
+    void withAdminLoading('Loading the academic catalog and dashboard…', () => Promise.all(tasks));
   };
 
   if (!document._adminLazyDataListener) {
@@ -273,7 +318,7 @@ export function setupLogin() {
   });
   ['userSearch', 'userRoleFilter', 'userStatusFilter'].forEach((id) => document.getElementById(id)?.addEventListener('input', renderUsers));
 
-  request('/auth/me').then(async ({ user }) => {
+  withAdminLoading('Verifying your administrator session…', () => request('/auth/me')).then(async ({ user }) => {
     if (!['regular_admin', 'super_admin'].includes(user.role)) { window.location.assign('../denied.html'); return; }
     cache.adminRole = user.role;
     elements.loginCard.hidden = true;
@@ -282,7 +327,15 @@ export function setupLogin() {
     document.querySelectorAll('[data-super-admin]').forEach((item) => { item.hidden = user.role !== 'super_admin'; });
     await loadInitialAdminData(user.role);
     await openRequestedAdminDestination(user.role, getManagedUsers);
-  }).catch(() => { window.location.assign('../admin-login.html'); });
+  }).catch((error) => {
+    if (error.definitiveAuthFailure || error.status === 401) {
+      window.location.assign('../admin-login.html');
+      return;
+    }
+    elements.loginCard.hidden = false;
+    elements.dashboard.hidden = true;
+    elements.authError.textContent = `Unable to verify your session because the API is unavailable. ${error.message}`;
+  });
 
   document.getElementById('resetRequestList')?.addEventListener('click', async (event) => {
     const button = event.target.closest('[data-reset-decision]'); if (!button) return;
@@ -344,6 +397,48 @@ export function setupLogin() {
     } catch (error) { setMessage('error', error.message); }
   });
   document.getElementById('complaintDetailClose')?.addEventListener('click', () => document.getElementById('complaintDetailDialog')?.close());
+  document.getElementById('errorReportStatus')?.addEventListener('change', () => loadErrorReports(0).catch((error) => setMessage('error', error.message)));
+  document.getElementById('errorReportCategory')?.addEventListener('change', () => loadErrorReports(0).catch((error) => setMessage('error', error.message)));
+  document.getElementById('errorReportDetailDialog')?.addEventListener('click', (event) => {
+    if (event.target.closest('[data-error-report-close]')) event.currentTarget.close();
+  });
+  document.getElementById('errorReportList')?.addEventListener('click', async (event) => {
+    const view = event.target.closest('[data-error-report-view]');
+    const update = event.target.closest('[data-error-report-status]');
+    if (!view && !update) return;
+    const index = view ? view.dataset.errorReportView : update.dataset.errorReportStatus;
+    const report = errorReportRows[Number(index)];
+    if (!report) return;
+    if (view) {
+      const dialog = document.getElementById('errorReportDetailDialog');
+      dialog.dataset.reportId = report.id;
+      showErrorReportDetail(report);
+      return;
+    }
+    const choice = await openFormDialog({ title: 'Update error report', description: `Current status: ${report.status}.`, submitLabel: 'Save report status', fields: [
+      { name: 'status', label: 'Status', type: 'select', value: 'reviewing', options: [{ value: 'reviewing', label: 'Reviewing' }, { value: 'resolved', label: 'Resolved' }] },
+      { name: 'resolutionNotes', label: 'Resolution notes (required when resolving)', type: 'textarea', value: report.resolution_notes || '' }
+    ] });
+    if (!choice) return;
+    await withButtonBusy(update, async () => {
+      try {
+        await request(`/admin/error-reports/${encodeURIComponent(report.id)}`, { method: 'PUT', body: JSON.stringify(choice) });
+        setMessage('success', `Error report marked ${choice.status}.`);
+        await loadErrorReports(errorReportPage);
+      } catch (error) { setMessage('error', error.message); }
+    });
+  });
+  document.getElementById('errorReportDetailContent')?.addEventListener('click', async (event) => {
+    if (!event.target.closest('[data-error-report-copy]')) return;
+    const report = errorReportRows.find((item) => item.id === document.getElementById('errorReportDetailDialog')?.dataset.reportId);
+    try { await navigator.clipboard.writeText(JSON.stringify(report?.technical_details || {}, null, 2)); event.target.textContent = 'Copied'; }
+    catch { event.target.textContent = 'Clipboard unavailable'; }
+  });
+  document.getElementById('errorReportsPagination')?.addEventListener('click', (event) => {
+    const direction = event.target.closest('[data-error-report-page]')?.dataset.errorReportPage;
+    if (!direction) return;
+    loadErrorReports(Math.max(0, errorReportPage + (direction === 'next' ? 1 : -1))).catch((error) => setMessage('error', error.message));
+  });
   if (!document.getElementById('admin-panel-requests')?._supportPageListener) {
     const requestsPanel = document.getElementById('admin-panel-requests');
     if (requestsPanel) requestsPanel._supportPageListener = true;

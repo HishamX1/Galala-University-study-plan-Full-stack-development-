@@ -700,3 +700,9 @@ pre {
   outline: 3px solid var(--gu-gold);
   outline-offset: 2px;
 }
+.gu-loading-screen { position: fixed; inset: 0; z-index: 10000; display: grid; place-content: center; justify-items: center; gap: 1rem; padding: 2rem; background: rgba(0, 33, 71, .96); color: #fff; text-align: center; }
+.gu-loading-screen[hidden] { display: none; }
+.gu-loading-screen img { width: min(220px, 60vw); max-height: 90px; object-fit: contain; background: #fff; border-radius: .75rem; padding: .75rem; }
+.gu-loading-spinner { display: inline-block; width: 2rem; height: 2rem; border: 3px solid rgba(255,255,255,.35); border-top-color: #d4af37; border-radius: 50%; animation: gu-spin .8s linear infinite; }
+@keyframes gu-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .gu-loading-spinner { animation: none; } }

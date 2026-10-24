@@ -16,7 +16,7 @@ globalThis.sessionStorage = {
   removeItem: (key) => stored.delete(key)
 };
 globalThis.document = { querySelector: () => null };
-globalThis.location = { replaced: null, replace(path) { this.replaced = path; } };
+globalThis.location = { href: 'https://example.test/student/index.html', replaced: null, replace(path) { this.replaced = path; } };
 
 const { restoreSession, clearAuthenticatedState, signOut } = await import(`../frontend/shared/session.js?session-test=${Date.now()}`);
 const activeUser = { id: '8a2e9e40-f279-43de-a90c-9d706bf1cf99', role: 'student', status: 'active', name: 'Test Student' };
@@ -74,9 +74,19 @@ setFetch(async (url) => {
 assert.equal(await restoreSession(), null, 'malformed or inactive refresh users fail closed');
 assert.equal(stored.has('guAuthenticatedUser'), false);
 assert.ok(failureCalls >= 4, 'failed first-origin restoration preserves API candidate fallback');
+
+stored.set('guAuthenticatedUser', JSON.stringify(activeUser));
+clearAuthenticatedState();
+stored.set('guAuthenticatedUser', JSON.stringify(activeUser));
+setFetch(async () => { throw new TypeError('Failed to fetch'); });
+assert.deepEqual(await restoreSession(), { unavailable: true, user: activeUser }, 'network errors are distinct from a definitive invalid session');
+assert.equal(stored.get('guAuthenticatedUser'), JSON.stringify(activeUser), 'temporary network failures preserve cached display state without treating it as authentication');
+clearAuthenticatedState();
+setFetch(async () => { throw new TypeError('Failed to fetch'); });
+assert.deepEqual(await restoreSession(), { unavailable: true, user: null }, 'no prior user is still distinct from an invalid session during an outage');
 const studentPage = await readFile(new URL('../frontend/student/student.js', import.meta.url), 'utf8');
 const adminAuth = await readFile(new URL('../frontend/admin/modules/auth.js', import.meta.url), 'utf8');
-assert.match(studentPage, /if \(!authenticatedUser\) location\.replace\('\.\.\/student-login\.html'\)/,
+assert.match(studentPage, /if \(authenticatedUser\?\.unavailable\)[\s\S]*?if \(!authenticatedUser\) \{[\s\S]*?location\.replace\('\.\.\/student-login\.html'\)/,
   'students with expired or revoked refresh sessions retain the student-login redirect');
 assert.match(adminAuth, /window\.location\.assign\('\.\.\/admin-login\.html'\)/,
   'administrators with expired or revoked refresh sessions retain the admin-login redirect');
@@ -92,6 +102,11 @@ stored.set('guAuthenticatedUser', JSON.stringify(activeUser));
 await signOut('../index.html');
 assert.equal(logoutCalls, 1);
 assert.equal(stored.has('guAuthenticatedUser'), false, 'logout clears cached public user data');
-assert.equal(globalThis.location.replaced, '../index.html');
+assert.equal(globalThis.location.replaced, 'https://example.test/index.html');
+
+globalThis.location.replaced = null;
+setFetch(async () => { throw new TypeError('Failed to fetch'); });
+await signOut('../index.html');
+assert.match(globalThis.location.replaced, /logout=server-unconfirmed/, 'offline logout does not claim server-side revocation');
 
 console.log('Session restoration tests passed (backend validation, refresh round trips, coalescing, clearing, fallback, and logout).');

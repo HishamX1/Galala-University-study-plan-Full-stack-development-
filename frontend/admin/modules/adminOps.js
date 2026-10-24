@@ -1,6 +1,6 @@
 import { escapeHtml } from '../../shared/dom.js';
 import { download, request } from './apiClient.js';
-import { elements, setMessage, withButtonBusy } from './adminDom.js';
+import { elements, setMessage, withButtonBusy, withAdminLoading } from './adminDom.js';
 import { loadRelations } from './dataLoader.js';
 import { openConfirmDialog } from './dialogs.js';
 import { cache } from './state.js';
@@ -251,13 +251,13 @@ export function bindAdminOpsActions() {
     event.preventDefault();
     const nextTab = tabs[nextIndex].dataset.adminTab;
     activateAdminTab(nextTab, cache.adminRole, document, window, { focus: true });
-    loadAdminSection(nextTab).catch((error) => setMessage('error', error.message));
+    withAdminLoading('Loading this administrator section…', () => loadAdminSection(nextTab)).catch((error) => setMessage('error', error.message));
   });
 
   document.querySelectorAll('[data-admin-tab]').forEach((button) => {
     button.addEventListener('click', () => {
       activateAdminTab(button.dataset.adminTab, cache.adminRole);
-      loadAdminSection(button.dataset.adminTab).catch((error) => setMessage('error', error.message));
+      withAdminLoading('Loading this administrator section…', () => loadAdminSection(button.dataset.adminTab)).catch((error) => setMessage('error', error.message));
     });
   });
 
@@ -287,7 +287,11 @@ export function bindAdminOpsActions() {
     if (!quick && !restore && !purge && !exportBtn && !backupBtn && !downloadBackup && !validateImportBtn && !stageImportBtn && !reviewImport && !publishImport && !cancelImport) return;
     if (quick) {
       if (!activateAdminTab(quick.dataset.quick, cache.adminRole)) setMessage('error', 'That administrator section is not available to your account.');
-      else loadAdminSection(quick.dataset.quick).catch((error) => setMessage('error', error.message));
+      else withAdminLoading('Loading this administrator section…', async () => {
+        const task = loadAdminSection(quick.dataset.quick);
+        await Promise.resolve();
+        return task;
+      }).catch((error) => setMessage('error', error.message));
       return;
     }
 
