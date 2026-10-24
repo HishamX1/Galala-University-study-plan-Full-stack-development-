@@ -2,6 +2,9 @@ import { getApiCandidates, saveApiBase } from '../shared/apiConfig.js';
 import { normalizeCatalog } from '../shared/catalogNormalizer.js';
 import { restoreSession, signOut } from '../shared/session.js';
 import { escapeHtml } from '../shared/dom.js';
+import { reconcileStudentViewStack, resolveProgramFacultyId } from './navigation.js';
+
+const CATALOG_FRESHNESS_MS = 30_000;
 
 const apiCandidates = getApiCandidates();
 let workingApiBase = apiCandidates[0] || '/api';
@@ -13,6 +16,8 @@ document.getElementById('student-sign-out')?.addEventListener('click', () => sig
 const state = {
   viewStack: [],
   history: [],
+  currentView: 'overview',
+  catalogLoadedAt: 0,
   data: {
     faculties: [],
     programs: [],
@@ -58,8 +63,18 @@ const elements = {
   bgLayer: document.getElementById('bg-layer'),
   bgOverlay: document.getElementById('bg-overlay'),
   programsBackBtn: document.getElementById('programs-back-btn'),
-  historyList: document.getElementById('history-list')
+  historyList: document.getElementById('history-list'),
+  facultyNavBtn: document.getElementById('faculty-nav-btn'),
+  programsNavBtn: document.getElementById('programs-nav-btn'),
+  overviewTitle: document.getElementById('overview-title'),
+  navStatus: document.getElementById('student-nav-status'),
+  retryCatalogBtn: document.getElementById('retry-catalog-btn'),
+  mainContent: document.getElementById('main-content'),
+  visualization: document.getElementById('visualization-container')
 };
+
+let catalogLoadPromise = null;
+let navigationToRestore = null;
 
 async function fetchJson(path) {
   let lastError = null;
@@ -150,6 +165,10 @@ function showView(el) {
   hideAllViews();
   if (el) el.style.display = el === elements.loadingState || el === elements.errorState || el === elements.emptyState ? 'flex' : 'block';
   if (el?.classList?.contains('view-section')) {
+    state.currentView = el === elements.overviewView ? 'overview'
+      : el === elements.semesterView ? 'program'
+        : el === elements.courseView ? 'courses'
+          : el === elements.searchView ? 'search' : state.currentView;
     el.classList.remove('is-entering');
     const animate = () => el.classList.add('is-entering');
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(animate);
@@ -293,10 +312,17 @@ function renderHistory() {
   });
 }
 
-function renderOverview() {
+function focusOverview() {
+  elements.overviewTitle?.focus();
+  elements.overviewTitle?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+}
+
+function renderOverview({ focus = false } = {}) {
   showView(elements.overviewView);
   setBackgroundDepth(0);
   state.viewStack = [{ view: 'overview' }];
+  if (elements.overviewTitle) elements.overviewTitle.textContent = 'Choose a Faculty';
+  if (elements.navStatus) elements.navStatus.textContent = '';
   if (elements.programsBackBtn) elements.programsBackBtn.style.display = 'none';
   updateBreadcrumb([{ label: 'Home', active: true }]);
   syncFilterValues();
@@ -319,15 +345,20 @@ function renderOverview() {
   elements.facultyGrid.querySelectorAll('[data-faculty-id]').forEach((card) => {
     bindCardActivation(card, () => renderProgramsForFaculty(card.dataset.facultyId));
   });
+  if (focus) focusOverview();
 }
 
-function renderProgramsForFaculty(facultyId) {
+function renderProgramsForFaculty(facultyId, { resetStack = false, focus = false } = {}) {
+  const faculty = facultyById(facultyId);
+  if (!faculty) return renderOverview({ focus });
   showView(elements.overviewView);
   setBackgroundDepth(1);
-  state.viewStack.push({ view: 'faculty', facultyId });
+  if (resetStack) state.viewStack = [{ view: 'overview' }, { view: 'faculty', facultyId: Number(facultyId) }];
+  else state.viewStack.push({ view: 'faculty', facultyId: Number(facultyId) });
+  if (elements.overviewTitle) elements.overviewTitle.textContent = `Programs in ${faculty.name}`;
+  if (elements.navStatus) elements.navStatus.textContent = '';
   if (elements.programsBackBtn) elements.programsBackBtn.style.display = 'inline-flex';
 
-  const faculty = facultyById(facultyId);
   const programs = state.data.programs.filter((program) => program.facultyId === Number(facultyId));
   if (faculty) addHistory('faculty', faculty.id, faculty.name);
   updateBreadcrumb([{ label: 'Home', action: 'overview' }, { label: faculty?.name || 'Faculty', active: true }]);
@@ -350,9 +381,25 @@ function renderProgramsForFaculty(facultyId) {
   elements.facultyGrid.querySelectorAll('[data-program-id]').forEach((card) => {
     bindCardActivation(card, () => renderProgramSemesters(card.dataset.programId));
   });
+  if (focus) focusOverview();
+}
+
+function openFacultyNavigation() {
+  renderOverview({ focus: true });
+}
+
+function openProgramsNavigation() {
+  const facultyId = resolveProgramFacultyId(state.viewStack, state.data, elements.filterFaculty.value);
+  if (!facultyId || !facultyById(facultyId)) {
+    renderOverview({ focus: true });
+    if (elements.navStatus) elements.navStatus.textContent = 'Choose a faculty first, then select Programs.';
+    return;
+  }
+  renderProgramsForFaculty(facultyId, { resetStack: true, focus: true });
 }
 
 function renderProgramSemesters(programId) {
+  if (!programById(programId)) return renderOverview();
   showView(elements.semesterView);
   setBackgroundDepth(2);
   state.viewStack.push({ view: 'program', programId });
@@ -387,6 +434,7 @@ function renderProgramSemesters(programId) {
 }
 
 function renderCourseTable(programId, yearNo, semesterNo) {
+  if (!programById(programId) || !coursesFor(programId, yearNo, semesterNo).length) return renderOverview();
   showView(elements.courseView);
   setBackgroundDepth(3);
   state.viewStack.push({ view: 'courses', programId, yearNo, semesterNo });
@@ -469,6 +517,7 @@ function showCourseModal(courseId) {
   `;
   elements.viewHierarchyBtn.onclick = () => showHierarchyView(course.id);
   elements.courseModal.classList.add('active');
+  elements.courseModal.dataset.courseId = String(course.id);
   document.body.style.overflow = 'hidden';
 }
 
@@ -500,6 +549,7 @@ function showHierarchyView(courseId) {
     openRelatedCourse(Number(card.dataset.courseId));
   });
   elements.courseModal.classList.add('active');
+  elements.courseModal.dataset.courseId = String(course.id);
   document.body.style.overflow = 'hidden';
 }
 
@@ -562,6 +612,7 @@ function showRelatedCourseChoice(course) {
 
 function closeModal() {
   elements.courseModal.classList.remove('active');
+  delete elements.courseModal.dataset.courseId;
   document.body.style.overflow = '';
 }
 
@@ -575,6 +626,9 @@ function goBack() {
 }
 
 function setupEventListeners() {
+  elements.facultyNavBtn?.addEventListener('click', openFacultyNavigation);
+  elements.programsNavBtn?.addEventListener('click', openProgramsNavigation);
+  elements.retryCatalogBtn?.addEventListener('click', () => loadData({ preserveCurrent: true }));
   elements.filterFaculty.addEventListener('change', (event) => {
     updateProgramFilter(event.target.value);
     renderActiveFilters({ facultyId: event.target.value });
@@ -621,21 +675,90 @@ function setupEventListeners() {
   document.querySelector('.modal-close-btn')?.addEventListener('click', closeModal);
   elements.courseModal.addEventListener('click', (event) => { if (event.target === elements.courseModal) closeModal(); });
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeModal(); });
+  window.addEventListener('focus', () => { if (state.catalogLoadedAt && Date.now() - state.catalogLoadedAt >= CATALOG_FRESHNESS_MS) loadData({ preserveCurrent: true }); });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && state.catalogLoadedAt && Date.now() - state.catalogLoadedAt >= CATALOG_FRESHNESS_MS) loadData({ preserveCurrent: true });
+  });
 }
 
-async function loadData() {
-  showView(elements.loadingState);
-  try {
-    state.data = normalizeCatalog(await fetchJson('/catalog'));
-    updateStats();
-    populateFilters();
-    populateSearchSuggestions();
-    renderHistory();
-    renderOverview();
-  } catch (error) {
-    console.error('Failed to load canonical data:', error);
-    showError('Unable to load data. Please check the backend API connection and try again.');
+function setCatalogInteractionEnabled(enabled) {
+  elements.mainContent?.toggleAttribute('aria-busy', !enabled);
+  elements.mainContent?.querySelectorAll('button, input, select').forEach((control) => { control.disabled = !enabled; });
+  if (elements.facultyNavBtn) elements.facultyNavBtn.disabled = !enabled;
+  if (elements.programsNavBtn) elements.programsNavBtn.disabled = !enabled;
+  if (elements.retryCatalogBtn) elements.retryCatalogBtn.disabled = enabled;
+}
+
+function rememberCurrentNavigation() {
+  const modalCourseId = elements.courseModal?.classList.contains('active') ? elements.courseModal.dataset.courseId : null;
+  navigationToRestore = {
+    stack: state.viewStack.map((item) => ({ ...item })),
+    filters: { facultyId: elements.filterFaculty.value, programId: elements.filterProgram.value, yearNo: elements.filterYear.value, semesterNo: elements.filterSemester.value },
+    search: elements.courseSearch.value,
+    wasSearch: state.currentView === 'search',
+    modalCourseId,
+    scrollY: window.scrollY
+  };
+}
+
+function restoreNavigation(snapshot) {
+  const stack = reconcileStudentViewStack(snapshot.stack, state.data);
+  renderOverview();
+  for (const item of stack.slice(1)) {
+    if (item.view === 'faculty') renderProgramsForFaculty(item.facultyId);
+    if (item.view === 'program') renderProgramSemesters(item.programId);
+    if (item.view === 'courses') renderCourseTable(item.programId, item.yearNo, item.semesterNo);
   }
+  const filters = snapshot.filters || {};
+  const facultyId = state.data.faculties.some((x) => String(x.id) === String(filters.facultyId)) ? filters.facultyId : '';
+  const filteredPrograms = state.data.programs.filter((x) => !facultyId || x.facultyId === Number(facultyId));
+  const programId = filteredPrograms.some((x) => String(x.id) === String(filters.programId)) ? filters.programId : '';
+  const yearNo = programId && yearsForProgram(programId).some((x) => String(x) === String(filters.yearNo)) ? filters.yearNo : '';
+  const semesterNo = yearNo && semestersForProgramYear(programId, yearNo).some((x) => String(x) === String(filters.semesterNo)) ? filters.semesterNo : '';
+  syncFilterValues({ facultyId, programId, yearNo, semesterNo });
+  elements.courseSearch.value = snapshot.search || '';
+  if (snapshot.wasSearch && snapshot.search?.trim()) performSearch(snapshot.search);
+  const modalCourse = snapshot.modalCourseId && courseById(snapshot.modalCourseId);
+  if (modalCourse) showCourseModal(modalCourse.id);
+  else if (snapshot.modalCourseId) {
+    closeModal();
+    if (elements.navStatus) elements.navStatus.textContent = 'A course in the open details panel is no longer available.';
+  }
+  window.scrollTo({ top: snapshot.scrollY || 0, behavior: 'auto' });
+}
+
+async function loadData({ preserveCurrent = false } = {}) {
+  if (catalogLoadPromise) return catalogLoadPromise;
+  const snapshot = preserveCurrent ? (navigationToRestore || (rememberCurrentNavigation(), navigationToRestore)) : null;
+  setCatalogInteractionEnabled(false);
+  if (!state.catalogLoadedAt) showView(elements.loadingState);
+  catalogLoadPromise = (async () => {
+    try {
+      state.data = normalizeCatalog(await fetchJson('/catalog'));
+      state.catalogLoadedAt = Date.now();
+      updateStats();
+      populateFilters();
+      populateSearchSuggestions();
+      state.history = state.history.filter((item) => item.type === 'faculty'
+        ? !!facultyById(item.id) : item.type === 'program' ? !!programById(item.id) : !!courseById(item.id));
+      renderHistory();
+      if (snapshot) restoreNavigation(snapshot);
+      else renderOverview();
+      navigationToRestore = null;
+      setCatalogInteractionEnabled(true);
+      return true;
+    } catch (error) {
+      console.error('Failed to load canonical data:', error);
+      state.catalogLoadedAt = 0;
+      setCatalogInteractionEnabled(false);
+      if (elements.retryCatalogBtn) elements.retryCatalogBtn.disabled = false;
+      showError('Unable to refresh data. Please check the backend API connection and try again.');
+      return false;
+    } finally {
+      catalogLoadPromise = null;
+    }
+  })();
+  return catalogLoadPromise;
 }
 
 function initializeStudentPortal() {

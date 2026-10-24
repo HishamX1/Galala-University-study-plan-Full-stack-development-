@@ -14,6 +14,10 @@ const sharedCourseName = `Recycle Shared Course ${suffix}`;
 
 const ids = {};
 
+async function readRevision(executor) {
+  return String((await executor.query('SELECT public.get_catalog_revision()::text AS revision')).rows[0].revision);
+}
+
 async function setup(client) {
   const faculty = await client.query('INSERT INTO faculties (name) VALUES ($1) RETURNING id', [facultyName]);
   ids.faculty = faculty.rows[0].id;
@@ -45,6 +49,7 @@ async function setup(client) {
 async function run() {
   await withPostgresClient(async (client) => {
     await setup(client);
+    const beforeRollback = await readRevision(client);
     await client.query('BEGIN');
     try {
       await client.query('UPDATE faculties SET deleted_at = now() WHERE id = $1', [ids.faculty]);
@@ -56,14 +61,18 @@ async function run() {
     }
     const rolledBack = await client.query('SELECT deleted_at FROM faculties WHERE id = $1', [ids.faculty]);
     assert.equal(rolledBack.rows[0].deleted_at, null, 'failed audit must roll back the mutation');
+    assert.equal(await readRevision(client), beforeRollback, 'rolled-back recycle-bin mutation must not publish its catalog revision');
     await client.query('UPDATE faculties SET deleted_at = now() WHERE id = $1', [ids.faculty]);
     await client.query('UPDATE programs SET deleted_at = now() WHERE id IN ($1, $2)', [ids.program, ids.secondProgram]);
     await client.query('UPDATE program_courses SET deleted_at = now() WHERE id IN ($1, $2)', [ids.first, ids.second]);
     await client.query('UPDATE course_prerequisites SET deleted_at = now(), visible_to_students = false WHERE id = $1', [ids.relation]);
   });
 
+  let beforeRestore;
+  await withPostgresClient(async (client) => { beforeRestore = await readRevision(client); });
   assert.equal(await restoreRecycleItem('faculty', ids.faculty), true);
   await withPostgresClient(async (client) => {
+    assert.ok(BigInt(await readRevision(client)) > BigInt(beforeRestore), 'faculty and dependent restore commits must advance the catalog revision');
     const restored = await client.query('SELECT deleted_at FROM faculties WHERE id = $1', [ids.faculty]);
     const dependents = await client.query('SELECT deleted_at FROM programs WHERE id IN ($1, $2)', [ids.program, ids.secondProgram]);
     const relations = await client.query('SELECT deleted_at, visible_to_students FROM course_prerequisites WHERE id = $1', [ids.relation]);
@@ -74,8 +83,11 @@ async function run() {
     await client.query('UPDATE program_courses SET deleted_at = now() WHERE id = $1', [ids.sharedOne]);
   });
 
+  let beforePurge;
+  await withPostgresClient(async (client) => { beforePurge = await readRevision(client); });
   assert.equal(await permanentlyDeleteRecycleItem('course', ids.sharedOne), true);
   await withPostgresClient(async (client) => {
+    assert.ok(BigInt(await readRevision(client)) > BigInt(beforePurge), 'permanent recycle-bin deletion must advance the catalog revision');
     const shared = await client.query('SELECT id FROM courses WHERE id = $1', [ids.sharedCourse]);
     assert.equal(shared.rowCount, 1, 'shared course must survive while another program-course references it');
     const audit = await client.query("SELECT count(*)::int AS count FROM admin_audit_logs WHERE entity_id = $1 AND action = 'Permanently Deleted course'", [ids.sharedOne]);

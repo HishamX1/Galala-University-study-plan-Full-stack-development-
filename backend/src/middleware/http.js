@@ -1,5 +1,5 @@
 export function json(res, status, data, extraHeaders = {}) {
-  res.writeHead(status, { 'Content-Type': 'application/json', ...extraHeaders });
+  res.writeHead(status, { 'Content-Type': 'application/json', ...extraHeaders, 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(data));
 }
 

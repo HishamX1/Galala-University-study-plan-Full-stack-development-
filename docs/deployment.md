@@ -1,6 +1,6 @@
 # Deployment checklist
 
-The owner confirms that the active frontend host is Vercel and the backend is Render. Vercel project settings are not defined in this repository and must be checked in the authorized Vercel dashboard; root `netlify.toml` is retained legacy configuration and is not the active deployment source.
+The owner confirms that the active frontend host is Vercel and the backend is Render. The repository-root `vercel.json` selects `frontend/` as static output and defines the frontend routes and security headers. The Vercel project must use the repository root; private dashboard settings must be checked in the authorized Vercel dashboard.
 
 ## Backend On Render
 
@@ -25,7 +25,7 @@ Set `NODE_ENV=production`. Do not set `CORS_ORIGIN=*`; startup rejects it. Keep 
 
 ## Frontend on Vercel
 
-The static frontend files live in `frontend/`. Confirm in the Vercel project dashboard that the configured project root/output and route handling publish those files correctly. Do not infer Vercel settings from the legacy `netlify.toml`.
+The static frontend files live in `frontend/`. Configure the Vercel project root as the repository root; `vercel.json` sets `frontend/` as output. It defines direct routes for `/`, `/student`, and `/admin`, while static `.html` pages and asset paths are served from the same output directory. Repository checks verify the checked-in configuration, not the private Vercel dashboard settings.
 
 Set the backend API URL in `frontend/config.js`; the checked-in runtime default currently points to the Render API. Vercel dashboard build, environment, routing, and security-header settings remain external verification items.
 
@@ -37,9 +37,7 @@ window.__GU_API_BASE__ = 'https://your-render-backend.onrender.com/api';
 
 The browser will also accept `?apiBase=https://your-render-backend.onrender.com/api` or the admin login API base field for temporary testing.
 
-Because Vercel and Render are separate origins, `COOKIE_SAME_SITE=None` and HTTPS (`COOKIE_SECURE=true`) are required for login cookies to accompany API requests. Verify the deployed Vercel routes `/`, `/student`, and `/admin` in the provider dashboard/browser; this repository does not contain Vercel routing configuration.
-
-`netlify.toml` remains in the repository as legacy configuration pending a separately approved cleanup. It is not part of the active Vercel release procedure.
+Because Vercel and Render are separate origins, `COOKIE_SAME_SITE=None` and HTTPS (`COOKIE_SECURE=true`) are required for login cookies to accompany API requests. Verify the routes and response headers in the authorized Vercel project/browser before a release; repository configuration cannot verify dashboard overrides or deployment state.
 
 ### Student password-reset email
 

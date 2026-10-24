@@ -12,6 +12,7 @@ const repositoryRoot = path.resolve(__dirname, '..');
 let failed = false;
 function check(ok, label, detail = '') { console.log(`${ok ? '✓' : '✗'} ${label}${detail ? ` — ${detail}` : ''}`); if (!ok) failed = true; }
 function read(file) { try { return fs.readFileSync(file, 'utf8'); } catch { return ''; } }
+function readJson(file) { try { return JSON.parse(read(file)); } catch { return null; } }
 
 console.log('Galala Study Plan deployment doctor\n');
 try { validateStartupConfig(); check(true, 'Backend configuration'); }
@@ -57,7 +58,27 @@ check(/https:\/\/galala-university-study-plan-full-stack-kd69\.onrender\.com\/ap
 check(fs.existsSync(path.join(repositoryRoot, 'frontend', 'index.html')), 'Static frontend entry point present');
 const render = read(path.join(repositoryRoot, 'render.yaml'));
 check(/NODE_ENV[\s\S]*production/.test(render) && /JWT_SECRET/.test(render), 'Render source manifest declares production runtime settings');
-console.log('ℹ Provider dashboard settings are not inspected here. Confirm Vercel frontend and Render backend settings through their authorized dashboards; netlify.toml is retained legacy configuration.');
+const vercel = readJson(path.join(repositoryRoot, 'vercel.json'));
+check(vercel?.outputDirectory === 'frontend', 'Vercel static output directory', vercel?.outputDirectory || 'vercel.json is missing or invalid');
+const rewrites = Array.isArray(vercel?.rewrites) ? vercel.rewrites : [];
+const requiredRoutes = [
+  ['/', '/index.html'],
+  ['/student', '/student/index.html'],
+  ['/admin', '/admin/index.html']
+];
+check(requiredRoutes.every(([source, destination]) => rewrites.some((route) => route.source === source && route.destination === destination)), 'Vercel static page routes');
+const vercelHeaders = Array.isArray(vercel?.headers) ? vercel.headers.flatMap((rule) => rule.headers || []) : [];
+const headerValues = new Map(vercelHeaders.map(({ key, value }) => [String(key).toLowerCase(), value]));
+const requiredHeaders = ['x-content-type-options', 'x-frame-options', 'referrer-policy', 'permissions-policy', 'content-security-policy', 'strict-transport-security'];
+check(requiredHeaders.every((name) => headerValues.has(name)), 'Vercel security response headers');
+const csp = String(headerValues.get('content-security-policy') || '');
+check(csp.includes("https://fonts.googleapis.com") && csp.includes("https://fonts.gstatic.com")
+  && csp.includes('https://galala-university-study-plan-full-stack-kd69.onrender.com'), 'Vercel CSP permits configured font and Render API origins');
+check(!vercel?.rewrites?.some((route) => String(route.destination || '').startsWith('/api')), 'Vercel does not proxy authenticated API requests');
+check(fs.existsSync(path.join(repositoryRoot, 'frontend', 'student-login.html'))
+  && fs.existsSync(path.join(repositoryRoot, 'frontend', 'images', 'GU-Logo-Color-Original.png')),
+'Vercel direct HTML pages and static assets remain in the output directory');
+console.log('ℹ Vercel dashboard project-root, environment, and override settings are not inspected. Configure the repository root as project root; vercel.json publishes frontend/.');
 
 await closePool();
 console.log(`\n${failed ? 'Doctor found issues. Resolve every ✗ before production deployment.' : 'Doctor passed. Deployment prerequisites look ready.'}`);

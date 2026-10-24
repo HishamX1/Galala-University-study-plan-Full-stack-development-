@@ -2,11 +2,11 @@
 
 ## Project contract
 
-This repository root is the directory containing `.git`, `package.json`, `backend/`, `frontend/`, `supabase/`, `render.yaml`, and `netlify.toml`.
+This repository root is the directory containing `.git`, `package.json`, `backend/`, `frontend/`, `supabase/`, `render.yaml`, and `vercel.json`.
 
 The current source tree has two parallel application trees: the root `backend/` + `frontend/` implementation and a duplicated `modernization/` tree. Treat the root implementation as the source to inspect for normal code work. Do not assume that `modernization/` is canonical or copy changes between the trees without explicit architectural confirmation.
 
-The canonical deployment configuration is root `render.yaml` plus root `netlify.toml`: Render uses the repository root and Netlify publishes `frontend/`. The root `package.json` owns the root scripts. Keep the older `modernization/` tree out of runtime configuration.
+The active frontend host is Vercel (owner-confirmed); `vercel.json` defines static output, routes, and response headers. The Vercel dashboard project-root assumption is the repository root, with `frontend/` as output; private dashboard settings still require owner-side verification. Render uses the repository root for the backend, and root `package.json` owns the scripts. Keep the older `modernization/` tree out of runtime configuration.
 
 ## Current architecture
 
@@ -46,7 +46,7 @@ The canonical deployment configuration is root `render.yaml` plus root `netlify.
 ## Deployment and data changes
 
 - Production deployment requires explicit user instruction. Do not deploy, apply migrations, seed data, bootstrap accounts, or modify production configuration during ordinary coding work.
-- Before any authorized deployment, validate the root Render start configuration, root Netlify publish directory, environment variables, CORS origin, cookies, and health checks.
+- Before any authorized deployment, validate the root Render start configuration, Vercel repository-root/output-directory assumption, environment variables, CORS origin, cookies, and health checks.
 - Keep `DATABASE_URL`, `JWT_SECRET`, credentials, reset tokens, and other secrets in ignored local environment files or hosting-provider secret configuration only.
 - Any schema or data change must be intentional, documented with compatibility and rollback implications, and accompanied by the necessary application and verification changes.
 

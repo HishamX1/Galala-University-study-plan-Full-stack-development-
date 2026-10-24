@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 
 process.env.NODE_ENV = 'production';
 const { applySecurityHeaders, CONTENT_SECURITY_POLICY } = await import('../backend/src/middleware/requestContext.js');
+const { json } = await import('../backend/src/middleware/http.js');
 
 function response() {
   return { headers: {}, setHeader(name, value) { this.headers[name] = value; } };
@@ -23,5 +24,13 @@ const httpResponse = response();
 applySecurityHeaders(httpResponse, { headers: { 'x-forwarded-proto': 'http' }, socket: {} });
 assert.equal(httpResponse.headers['Strict-Transport-Security'], undefined);
 assert.equal(httpResponse.headers['Content-Security-Policy'], CONTENT_SECURITY_POLICY);
+
+const apiResponse = {
+  headers: {}, body: '',
+  writeHead(status, headers) { this.statusCode = status; Object.assign(this.headers, headers); },
+  end(body) { this.body = body; }
+};
+json(apiResponse, 200, { user: { role: 'student' } }, { 'Cache-Control': 'public, max-age=60' });
+assert.equal(apiResponse.headers['Cache-Control'], 'no-store', 'JSON API responses cannot be cached, even when a caller attempts to override the header');
 
 console.log('Security header regression test passed.');

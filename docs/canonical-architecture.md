@@ -1,8 +1,10 @@
 # Canonical Architecture
 
-The live runtime is intentionally small:
+The intended live runtime is intentionally small (frontend host confirmed by the owner; hosted settings still need read-only verification):
 
-`Netlify frontend -> Render backend API -> Supabase Postgres`
+`Vercel frontend -> Render backend API -> Supabase Postgres`
+
+The root `vercel.json` sets `frontend/` as the static output directory and contains direct routes and security headers. The Vercel project must use the repository root; its private dashboard settings remain an owner-side verification item.
 
 ## Active Runtime
 
@@ -24,6 +26,8 @@ Only these Supabase tables are runtime sources:
 - `course_prerequisites`
 
 The UI derives year and semester groupings from `program_courses.year_no` and `program_courses.semester_no`.
+
+`GET /api/catalog` uses a bounded, audience-separated process cache backed by a shared PostgreSQL revision row. Transactional statement triggers cover all five catalog tables, so admin changes, imports, recycle-bin operations, and direct catalog writes invalidate every backend instance. Cache fills verify the revision before and after loading. See [catalog cache behavior and rollout](catalog-cache.md).
 
 ## Boundaries
 
