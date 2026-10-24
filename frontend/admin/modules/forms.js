@@ -5,7 +5,7 @@ import { loadRelations } from './dataLoader.js';
 import { loadAdminOps } from './adminOps.js';
 import { openConfirmDialog, openContentDialog, openFormDialog } from './dialogs.js';
 import { renderLists } from './renderLists.js';
-import { mapCodesToIds, parsePrerequisiteCodes, prerequisiteCodes, prerequisiteRelationItems, requiredForRelationItems } from './prerequisites.js';
+import { expectedRelationVersion, mapCodesToIds, parsePrerequisiteCodes, prerequisiteCodes, prerequisiteRelationItems, requiredForRelationItems } from './prerequisites.js';
 import { cache, lookupName } from './state.js';
 import { escapeHtml } from '../../shared/dom.js';
 
@@ -203,7 +203,7 @@ async function openCourseView(course) {
         <section><h3>Prerequisites</h3><div class="relation-list">${compactRelations(prerequisites, 'prerequisite')}</div></section>
         <section><h3>Required For</h3><div class="relation-list">${compactRelations(requiredFor, 'dependent')}</div></section>
       </div>
-      <div class="dialog-inline-actions"><button type="button" data-edit="${course.id}" data-kind="course">Edit Course</button><button type="button" data-manage-relations="${course.id}">Manage Relations</button></div>
+      <div class="dialog-inline-actions"><button type="button" data-edit="${course.id}" data-kind="course">Edit Course</button><button type="button" data-manage-relations="${course.id}">Manage Relations</button><button type="button" class="danger" data-delete="${course.id}" data-kind="course" aria-label="Move ${escapeHtml(course.code)} to recycle bin">Move course to recycle bin</button></div>
     `
   });
 }
@@ -240,7 +240,7 @@ async function openRelationManager(course) {
             const prerequisiteCourseId = type === 'prerequisite' ? selectedCourseId : baseCourseId;
             await request(`/program-courses/${courseId}/prerequisites`, {
               method: 'POST',
-              body: JSON.stringify({ prerequisiteCourseId, expectedVersion: findCourse(courseId)?.version })
+              body: JSON.stringify({ prerequisiteCourseId, expectedVersion: expectedRelationVersion(findCourse(courseId)) })
             });
             setMessage('success', 'Relationship added.');
             await refreshRelationManager(root, baseCourseId);
@@ -252,7 +252,7 @@ async function openRelationManager(course) {
             const visibleToStudents = toggleBtn.dataset.visible === 'true';
             await request(`/program-courses/${courseId}/prerequisites/${prerequisiteId}/visibility`, {
               method: 'PUT',
-              body: JSON.stringify({ visibleToStudents, expectedVersion: findCourse(courseId)?.version })
+              body: JSON.stringify({ visibleToStudents, expectedVersion: expectedRelationVersion(findCourse(courseId)) })
             });
             setMessage('success', `Relation ${visibleToStudents ? 'shown to' : 'hidden from'} students.`);
             await refreshRelationManager(root, course.id);
@@ -262,7 +262,7 @@ async function openRelationManager(course) {
             const courseId = Number(removeBtn.dataset.dialogRemove);
             const prerequisiteId = Number(removeBtn.dataset.prerequisiteId);
             await request(`/program-courses/${courseId}/prerequisites/${prerequisiteId}`, {
-              method: 'DELETE', body: JSON.stringify({ expectedVersion: findCourse(courseId)?.version })
+              method: 'DELETE', body: JSON.stringify({ expectedVersion: expectedRelationVersion(findCourse(courseId)) })
             });
             setMessage('success', 'Relationship removed.');
             await refreshRelationManager(root, course.id);
@@ -318,12 +318,18 @@ export function bindCrudDelegates() {
     try {
       if (viewBtn) {
         const course = findCourse(viewBtn.dataset.viewCourse);
-        if (course) await openCourseView(course);
+        if (course) {
+          await openCourseView(course);
+          return;
+        }
       }
 
       if (manageBtn) {
         const course = findCourse(manageBtn.dataset.manageRelations);
-        if (course) await openRelationManager(course);
+        if (course) {
+          await openRelationManager(course);
+          return;
+        }
       }
 
       if (toggleBtn) {
@@ -334,7 +340,7 @@ export function bindCrudDelegates() {
           setMessage('progress', 'Updating relationship visibility…');
           await request(`/program-courses/${courseId}/prerequisites/${prerequisiteId}/visibility`, {
             method: 'PUT',
-            body: JSON.stringify({ visibleToStudents, expectedVersion: findCourse(courseId)?.version })
+            body: JSON.stringify({ visibleToStudents, expectedVersion: expectedRelationVersion(findCourse(courseId)) })
           });
         });
         setMessage('success', `Relation ${visibleToStudents ? 'shown to' : 'hidden from'} students.`);
@@ -355,20 +361,25 @@ export function bindCrudDelegates() {
       if (deleteBtn) {
         const id = Number(deleteBtn.dataset.delete);
         const kind = deleteBtn.dataset.kind;
-        const confirmed = await confirmDeletion(kind, id);
-        if (!confirmed) return;
         const current = kind === 'faculty'
           ? cache.faculties.find((item) => Number(item.id) === id)
           : kind === 'program'
             ? cache.programs.find((item) => Number(item.id) === id)
             : cache.programCourses.find((item) => Number(item.id) === id);
+        const fromCourseDetails = kind === 'course' && elements.dialog.fields.contains(deleteBtn);
+        const confirmed = await confirmDeletion(kind, id);
+        if (!confirmed) {
+          if (fromCourseDetails && current) await openCourseView(current);
+          return;
+        }
         await withButtonBusy(deleteBtn, async () => {
           setMessage('progress', `Deleting the ${kind}…`);
           await request(`/${endpointFor(kind)}/${id}`, {
             method: 'DELETE', body: JSON.stringify({ expectedVersion: current?.version })
           });
         });
-        setMessage('success', `${kind[0].toUpperCase()}${kind.slice(1)} deleted successfully.`);
+        if (fromCourseDetails) elements.dialog.backdrop.hidden = true;
+        setMessage('success', `${kind[0].toUpperCase()}${kind.slice(1)} moved to the recycle bin successfully.`);
       }
 
       await loadRelations();

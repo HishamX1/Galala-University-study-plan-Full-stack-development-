@@ -4,6 +4,7 @@ import fs from 'node:fs';
 const fakeElements = new Map();
 globalThis.document = { getElementById: (id) => fakeElements.get(id) || null };
 const { withButtonBusy, withAdminLoading } = await import('../frontend/admin/modules/adminDom.js');
+const { expectedRelationVersion } = await import('../frontend/admin/modules/prerequisites.js');
 
 const html = fs.readFileSync(new URL('../frontend/admin/index.html', import.meta.url), 'utf8');
 const css = fs.readFileSync(new URL('../frontend/admin/admin.css', import.meta.url), 'utf8');
@@ -13,6 +14,12 @@ const adminOps = fs.readFileSync(new URL('../frontend/admin/modules/adminOps.js'
 const adminDom = fs.readFileSync(new URL('../frontend/admin/modules/adminDom.js', import.meta.url), 'utf8');
 const forms = fs.readFileSync(new URL('../frontend/admin/modules/forms.js', import.meta.url), 'utf8');
 const renderLists = fs.readFileSync(new URL('../frontend/admin/modules/renderLists.js', import.meta.url), 'utf8');
+const dialogsSource = fs.readFileSync(new URL('../frontend/admin/modules/dialogs.js', import.meta.url), 'utf8');
+
+assert.deepEqual(expectedRelationVersion({ version: { updatedAt: '2026-10-24T13:23:41.490000Z', relatedUpdatedAt: '2026-10-23T10:00:00.000000Z' } }),
+  { updatedAt: '2026-10-24T13:23:41.490000Z' }, 'relation writes send only the version field accepted by their endpoint');
+assert.throws(() => expectedRelationVersion({ version: null }), /Refresh the catalog/,
+  'relation writes fail safely rather than dropping optimistic concurrency when a version is missing');
 
 const busyAttributes = new Set();
 const busyButton = {
@@ -130,8 +137,21 @@ assert.match(auth, /escapeReport\(report\.message\)/, 'stored error report messa
 assert.match(auth, /data-error-report-copy/, 'report details provide a clipboard action');
 assert.match(forms, /summarizeCourseImpact/);
 assert.match(forms, /is moved to the recycle bin and disappears from the active student catalog/);
+assert.match(forms, /data-delete="\$\{course\.id\}" data-kind="course"[^>]*>Move course to recycle bin/,
+  'course details expose the standard soft-delete action');
+assert.match(forms, /fromCourseDetails[\s\S]*?if \(!confirmed\)[\s\S]*?openCourseView\(current\)/,
+  'cancelling course deletion returns the administrator to course details');
+assert.equal((forms.match(/expectedVersion: expectedRelationVersion\(findCourse\(courseId\)\)/g) || []).length, 4,
+  'all prerequisite add, visibility, and removal controls use a valid updatedAt version');
 assert.match(renderLists, /Move to recycle bin/);
 assert.match(renderLists, /aria-label="View course details:/);
+assert.match(adminOps, /⚠ Permanently delete \$\{label\}\?/);
+assert.match(adminOps, /cannot be undone or restored/);
+assert.match(adminOps, /catalogAuditValues\(log\)/, 'audit rows expose catalog before/after values for review');
+assert.match(adminOps, /\['faculty', 'program', 'course', 'relation'\]/, 'audit details are limited to catalog records');
+assert.match(dialogsSource, /export function openContentDialog/);
+assert.doesNotMatch(dialogsSource.match(/export function openContentDialog[\s\S]*?\n}/)?.[0] || '', /new Promise/,
+  'read-only content dialogs do not leave unresolved submit handlers when a confirmation dialog replaces them');
 assert.match(adminOps, /title: 'Publish the reviewed catalog import\?'/);
 
 console.log('Administrator UI hierarchy, responsive/accessibility, action-feedback, and confirmation contracts passed.');

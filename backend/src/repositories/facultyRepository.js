@@ -8,8 +8,8 @@ export async function updateActiveFaculty(id, name, executor, expectedUpdatedAt)
     : await executor.query(`UPDATE faculties SET name=COALESCE($2,name),updated_at=now() WHERE id=$1 AND deleted_at IS NULL RETURNING id,name,to_char(updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at`, [id, name]);
 }
 export async function listActiveFacultyProgramCourseIds(id, executor) { return (await executor.query('SELECT pc.id FROM program_courses pc JOIN programs p ON p.id=pc.program_id WHERE p.faculty_id=$1 AND pc.deleted_at IS NULL', [id])).rows; }
-export async function softDeleteFaculty(id, executor, expectedUpdatedAt) {
+export async function softDeleteFaculty(id, executor, expectedUpdatedAt, deletedBy = 'Admin') {
   return expectedUpdatedAt
-    ? executor.query("UPDATE faculties SET deleted_at=now(),deleted_by='Admin',delete_reason='Admin delete',updated_at=now() WHERE id=$1 AND deleted_at IS NULL AND updated_at=$2::timestamptz", [id, expectedUpdatedAt])
-    : executor.query("UPDATE faculties SET deleted_at=now(),deleted_by='Admin',delete_reason='Admin delete',updated_at=now() WHERE id=$1 AND deleted_at IS NULL", [id]);
+    ? executor.query("UPDATE faculties SET deleted_at=now(),deleted_by=$3,delete_reason='Admin delete',updated_at=now() WHERE id=$1 AND deleted_at IS NULL AND updated_at=$2::timestamptz", [id, expectedUpdatedAt, deletedBy])
+    : executor.query("UPDATE faculties SET deleted_at=now(),deleted_by=$2,delete_reason='Admin delete',updated_at=now() WHERE id=$1 AND deleted_at IS NULL", [id, deletedBy]);
 }

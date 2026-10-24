@@ -30,6 +30,15 @@ function statusPill(label, value) {
   return `<div class="health-row"><span>${escapeHtml(label)}</span><strong class="status-dot ${escapeHtml(value || 'yellow')}">${escapeHtml(value || 'unknown')}</strong></div>`;
 }
 
+function catalogAuditValues(log) {
+  if (!['faculty', 'program', 'course', 'relation'].includes(log.entity)) return '';
+  const values = [
+    log.old_values && `Before:\n${JSON.stringify(log.old_values, null, 2)}`,
+    log.new_values && `After:\n${JSON.stringify(log.new_values, null, 2)}`
+  ].filter(Boolean).join('\n\n');
+  return values ? `<details><summary>Record changes</summary><pre>${escapeHtml(values)}</pre></details>` : '';
+}
+
 function downloadPayload(payload) {
   const blob = payload.content instanceof Blob ? payload.content : new Blob([payload.content || ''], { type: payload.mimeType || 'text/plain' });
   const url = URL.createObjectURL(blob);
@@ -192,7 +201,7 @@ export function renderAdminOps() {
       <td>${escapeHtml(log.category || 'admin')}</td>
       <td>${escapeHtml(log.outcome || 'success')}</td>
       <td>${escapeHtml(log.request_id || '-')}</td>
-      <td>${escapeHtml(log.description || '')}</td>
+      <td>${escapeHtml(log.description || '')}${catalogAuditValues(log)}</td>
     </tr>`).join('') || '<tr><td colspan="9">No audit logs found.</td></tr>';
   }
 
@@ -309,7 +318,7 @@ export function bindAdminOpsActions() {
       if (purge) {
         const item = cache.recycleBin.find((entry) => String(entry.id) === purge.dataset.purge);
         const label = item?.label || `${purge.dataset.kind} record`;
-        const confirmed = await openConfirmDialog({ title: `Permanently delete ${label}?`, description: `This permanently removes ${label} from the recycle bin. It cannot be restored afterward. Review its listed dependencies before continuing.`, submitLabel: 'Permanently delete' });
+        const confirmed = await openConfirmDialog({ title: `⚠ Permanently delete ${label}?`, description: `Warning: This permanently removes ${label} from the recycle bin and cannot be undone or restored. Review its listed dependencies before continuing.`, submitLabel: 'Permanently delete' });
         if (!confirmed) return;
         await request(`/admin/recycle-bin/${purge.dataset.kind}/${purge.dataset.purge}`, { method: 'DELETE' });
         setMessage('success', 'Item permanently deleted.');

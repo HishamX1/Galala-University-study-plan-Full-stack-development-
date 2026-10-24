@@ -157,8 +157,14 @@ try {
   const hiddenCatalog = await getProgramCourses({ programId: program.id }, { includeHidden: true });
   assert.equal(hiddenCatalog.find((course) => course.id === third.id).prerequisiteRelations[0].visibleToStudents, false);
   assert.equal(await updatePrerequisiteVisibility(third.id, first.id, true), true);
-  assert.equal(await deletePrerequisiteRelation(third.id, first.id), true);
+  assert.equal(await deletePrerequisiteRelation(third.id, first.id, undefined, actor), true);
   assert.deepEqual(await getPrerequisites(third.id), []);
+  assert.deepEqual((await rows('SELECT deleted_by, delete_reason FROM course_prerequisites WHERE id = $1', [relation.id]))[0],
+    { deleted_by: actor.name, delete_reason: 'Admin delete' }, 'removed relations retain the deleting administrator and reason in the recycle bin');
+  for (const action of ['Created Relation', 'Hidden Relation', 'Restored Relation Visibility', 'Deleted Relation']) {
+    assert.equal(await count('SELECT count(*)::int AS count FROM admin_audit_logs WHERE action = $1 AND entity_id = $2', [action, relation.id]), 1,
+      `${action} writes one catalog audit entry`);
+  }
 
   const updatedSecond = await updateProgramCourse(second.id, {
     name: `AR1 Course B Updated ${suffix}`,
@@ -229,13 +235,24 @@ try {
   assert.equal(await count('SELECT count(*)::int AS count FROM course_prerequisites WHERE course_id = $1 AND prerequisite_course_id = $2 AND deleted_at IS NULL', [second.id, first.id]), 1);
   assert.equal(await count("SELECT count(*)::int AS count FROM admin_audit_logs WHERE action = 'Deleted Faculty' AND entity_id = $1", [faculty.id]), 0);
 
-  assert.equal(await deleteProgramCourse(third.id), true);
+  const thirdBeforeSoftDelete = (await getProgramCourses({ programId: program.id }))
+    .find((course) => course.id === third.id);
+  assert.ok(thirdBeforeSoftDelete, 'the course should still be active before it is moved to the recycle bin');
+  assert.equal(await deleteProgramCourse(third.id, thirdBeforeSoftDelete.version, actor), true);
   assert.equal(await count('SELECT count(*)::int AS count FROM program_courses WHERE id = $1 AND deleted_at IS NOT NULL', [third.id]), 1);
-  assert.equal(await deleteProgram(program.id), true);
+  assert.deepEqual((await rows('SELECT deleted_by, delete_reason FROM program_courses WHERE id = $1', [third.id]))[0],
+    { deleted_by: actor.name, delete_reason: 'Admin delete' }, 'course soft-delete retains the deleting administrator and reason');
+  assert.equal(await count("SELECT count(*)::int AS count FROM admin_audit_logs WHERE action = 'Deleted Course' AND entity_id = $1", [third.id]), 1,
+    'moving a course to the recycle bin is recorded in the audit log');
+  assert.equal(await deleteProgram(program.id, undefined, actor), true);
   assert.equal(await count('SELECT count(*)::int AS count FROM programs WHERE id = $1 AND deleted_at IS NOT NULL', [program.id]), 1);
+  assert.deepEqual((await rows('SELECT deleted_by, delete_reason FROM programs WHERE id = $1', [program.id]))[0],
+    { deleted_by: actor.name, delete_reason: 'Admin delete' }, 'program soft-delete retains the deleting administrator and reason');
   assert.equal(await count('SELECT count(*)::int AS count FROM program_courses WHERE id = ANY($1::bigint[]) AND deleted_at IS NOT NULL', [fixture.programCourseIds]), 3);
-  assert.equal(await deleteFaculty(faculty.id), true);
+  assert.equal(await deleteFaculty(faculty.id, undefined, actor), true);
   assert.equal(await count('SELECT count(*)::int AS count FROM faculties WHERE id = $1 AND deleted_at IS NOT NULL', [faculty.id]), 1);
+  assert.deepEqual((await rows('SELECT deleted_by, delete_reason FROM faculties WHERE id = $1', [faculty.id]))[0],
+    { deleted_by: actor.name, delete_reason: 'Admin delete' }, 'faculty soft-delete retains the deleting administrator and reason');
 
   console.log('Catalog CRUD, prerequisite rollback, and shared-executor transaction integration tests passed.');
 } finally {

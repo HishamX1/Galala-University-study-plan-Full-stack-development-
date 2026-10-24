@@ -6,6 +6,7 @@ let previousFocus = null;
 
 function closeDialog(result) {
   elements.dialog.backdrop.hidden = true;
+  elements.dialog.cancel.hidden = false;
   elements.dialog.form.onsubmit = null;
   activeResolver?.(result);
   activeResolver = null;
@@ -98,15 +99,10 @@ export function openContentDialog({ title, description = '', content, submitLabe
   elements.dialog.backdrop.hidden = false;
   setTimeout(() => (elements.dialog.fields.querySelector('input, select, button') || elements.dialog.submit).focus(), 0);
 
-  return new Promise((resolve) => {
-    activeResolver = (result) => {
-      elements.dialog.cancel.hidden = false;
-      resolve(result);
-    };
-    elements.dialog.form.onsubmit = (event) => {
-      event.preventDefault();
-      closeDialog(true);
-    };
-    onOpen?.(elements.dialog.fields);
-  });
+  activeResolver = null;
+  elements.dialog.form.onsubmit = (event) => {
+    event.preventDefault();
+    closeDialog(true);
+  };
+  onOpen?.(elements.dialog.fields);
 }
