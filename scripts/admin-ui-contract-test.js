@@ -137,6 +137,22 @@ assert.match(auth, /escapeReport\(report\.message\)/, 'stored error report messa
 assert.match(auth, /data-error-report-copy/, 'report details provide a clipboard action');
 assert.match(forms, /summarizeCourseImpact/);
 assert.match(forms, /is moved to the recycle bin and disappears from the active student catalog/);
+assert.match(forms, /function hasUncertainMutationOutcome\(error\)/,
+  'network failures and timeouts are distinguished from definitive API responses');
+assert.match(forms, /error\.status === 404[\s\S]*refreshRelationManager/,
+  'a stale relationship response reloads the relationship list');
+assert.match(forms, /The connection was interrupted and the result could not be verified[\s\S]*Do not retry/,
+  'uncertain relationship writes require state verification instead of automatic replay');
+assert.match(forms, /const confirmed = refreshed && relationMutation[\s\S]*relationMutation\.type === 'remove' && !relation[\s\S]*latest catalog confirms that the relationship was/,
+  'a fresh catalog read can confirm a relationship mutation whose response was lost');
+assert.match(forms, /deletion preview could not reach the API, so no deletion was submitted/,
+  'a failed course-impact preview clearly confirms that deletion was not submitted');
+assert.match(forms, /deleteFlow\.submitted = true[\s\S]*latest catalog confirms the course is no longer active/,
+  'uncertain course deletions are reconciled with a fresh catalog read');
+assert.match(forms, /deleteFlow\.completed = true[\s\S]*server confirmed the deletion, but the follow-up catalog refresh could not reach the API/,
+  'a confirmed deletion is not misreported as failed if only the follow-up refresh loses connectivity');
+assert.doesNotMatch(forms, /catch\s*\([^)]*\)\s*\{[^{}]*request\([^{}]*method:\s*['"]DELETE['"]/,
+  'uncertain delete requests are never automatically replayed');
 assert.match(forms, /data-delete="\$\{course\.id\}" data-kind="course"[^>]*>Move course to recycle bin/,
   'course details expose the standard soft-delete action');
 assert.match(forms, /fromCourseDetails[\s\S]*?if \(!confirmed\)[\s\S]*?openCourseView\(current\)/,
