@@ -235,7 +235,10 @@ try {
   assert.equal(await count('SELECT count(*)::int AS count FROM course_prerequisites WHERE course_id = $1 AND prerequisite_course_id = $2 AND deleted_at IS NULL', [second.id, first.id]), 1);
   assert.equal(await count("SELECT count(*)::int AS count FROM admin_audit_logs WHERE action = 'Deleted Faculty' AND entity_id = $1", [faculty.id]), 0);
 
-  assert.equal(await deleteProgramCourse(third.id, third.version, actor), true);
+  const thirdBeforeSoftDelete = (await getProgramCourses({ programId: program.id }))
+    .find((course) => course.id === third.id);
+  assert.ok(thirdBeforeSoftDelete, 'the course should still be active before it is moved to the recycle bin');
+  assert.equal(await deleteProgramCourse(third.id, thirdBeforeSoftDelete.version, actor), true);
   assert.equal(await count('SELECT count(*)::int AS count FROM program_courses WHERE id = $1 AND deleted_at IS NOT NULL', [third.id]), 1);
   assert.deepEqual((await rows('SELECT deleted_by, delete_reason FROM program_courses WHERE id = $1', [third.id]))[0],
     { deleted_by: actor.name, delete_reason: 'Admin delete' }, 'course soft-delete retains the deleting administrator and reason');
