@@ -97,8 +97,8 @@ assert.match(adminAuth, /loadRelations\(\)\.catch\(\(error\) => setMessage\('err
   'catalog loading failure is surfaced without blocking the control panel');
 assert.match(adminAuth, /loadAdminOps\(\)\.catch\(\(error\) => setMessage\('error', `Dashboard operations could not be loaded: \$\{error\.message\}`\)\)/,
   'dashboard operations failure is surfaced without blocking secondary tabs');
-assert.match(adminAuth, /const tasks = \[[\s\S]*?loadRelations\(\)[\s\S]*?loadAdminOps\(\)[\s\S]*?void withAdminLoading\('Loading the academic catalog and dashboard…', \(\) => Promise\.all\(tasks\)\)/,
-  'initial catalog and dashboard requests run concurrently without delaying tab or deep-link activation');
+assert.match(adminAuth, /const tasks = \[[\s\S]*?loadRelations\(\)[\s\S]*?loadAdminOps\(\)[\s\S]*?await withAdminLoading\('Loading the academic catalog and dashboard…', \(\) => Promise\.all\(tasks\)\)/,
+  'initial catalog and dashboard requests run concurrently and their loading state is awaited');
 assert.match(adminOps, /export async function loadAdminOps\(\) \{\s*const sections = new Set\(\['dashboard', \.\.\.loadedSections\]\)/,
   'admin operations startup refreshes the dashboard and only previously visited secondary sections');
 assert.match(adminOps, /export async function loadAdminSection\(section, \{ refresh = false \} = \{\}\)[\s\S]*?section === 'audit'[\s\S]*?section === 'recycle'[\s\S]*?section === 'backup'[\s\S]*?section === 'health'[\s\S]*?section === 'transfer'/,

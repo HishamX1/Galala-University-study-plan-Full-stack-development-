@@ -251,7 +251,11 @@ export function setupLogin() {
       loadRelations().catch((error) => setMessage('error', `Catalog could not be loaded: ${error.message}`)),
       loadAdminOps().catch((error) => setMessage('error', `Dashboard operations could not be loaded: ${error.message}`))
     ];
-    void withAdminLoading('Loading the academic catalog and dashboard…', () => Promise.all(tasks));
+    try {
+      await withAdminLoading('Loading the academic catalog and dashboard…', () => Promise.all(tasks));
+    } catch (error) {
+      setMessage('error', error.message);
+    }
   };
 
   if (!document._adminLazyDataListener) {
