@@ -36,7 +36,7 @@ function canAccess(user, req, pathname) {
   const isRead = req.method === 'GET';
   const curriculum = pathname === `${env.apiBasePath}/catalog` || pathname.startsWith(`${env.apiBasePath}/faculties`) || pathname.startsWith(`${env.apiBasePath}/programs`) || pathname.startsWith(`${env.apiBasePath}/program-courses`);
   const studentCatalog = pathname === `${env.apiBasePath}/catalog` || pathname === `${env.apiBasePath}/faculties` || pathname === `${env.apiBasePath}/programs` || pathname === `${env.apiBasePath}/program-courses` || new RegExp(`^${env.apiBasePath}/program-courses/\\d+/prerequisites$`).test(pathname);
-  if (user.role === 'student') return hasPermission(user, Permissions.catalogRead) && isRead && studentCatalog && !new URL(req.url, 'http://localhost').searchParams.has('audience');
+  if (user.role === 'student') return hasPermission(user, Permissions.catalogRead) && isRead && studentCatalog;
   // Regular administrators may operate the curriculum portal, but never the
   // super-admin account/request endpoints.  The old narrow allowlist made a
   // successful admin login look like a failed session during portal bootstrap.
@@ -50,7 +50,7 @@ function isStateChanging(method) { return ['POST', 'PUT', 'PATCH', 'DELETE'].inc
 function hasSessionCookie(req) { return /(?:^|;\s*)gu_(?:access|refresh)=/.test(String(req.headers.cookie || '')); }
 function trustedStateChange(req) {
   // Cookie-authenticated mutations require an explicit approved Origin. This
-  // preserves credentialed Netlify/Render requests while rejecting blind CSRF.
+  // preserves credentialed Vercel/Render requests while rejecting blind CSRF.
   if (!isStateChanging(req.method) || !hasSessionCookie(req)) return true;
   return isAllowedCorsOrigin(req.headers.origin);
 }
@@ -168,7 +168,7 @@ export async function handleApi(req, res, url, { resolveCurrentUser = currentUse
 
     if (await handleAdminOperationsRequest(req, res, url, user)) return true;
 
-    if (await handleCatalogReadRequest(req, res, url)) return true;
+    if (await handleCatalogReadRequest(req, res, url, user)) return true;
     if (await handleCatalogRequest(req, res, url, user)) return true;
 
     return json(res, 404, { error: 'API route not found' });

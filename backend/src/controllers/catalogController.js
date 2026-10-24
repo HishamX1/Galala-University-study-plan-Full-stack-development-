@@ -31,13 +31,13 @@ export async function handleCatalogDelete(req, res, deleter, id, label, actor) {
 
 const toNumber = (value) => value === undefined || value === null || value === '' || !Number.isInteger(Number(value)) ? undefined : Number(value);
 
-export async function handleCatalogReadRequest(req, res, url) {
+export async function handleCatalogReadRequest(req, res, url, user = null) {
   if (req.method !== 'GET') return false;
-  if (url.pathname === `${env.apiBasePath}/catalog`) { json(res, 200, await getCatalog({ includeHidden: url.searchParams.get('audience') === 'admin' })); return true; }
+  if (url.pathname === `${env.apiBasePath}/catalog`) { json(res, 200, await getCatalog({ includeHidden: user?.role !== 'student' })); return true; }
   if (url.pathname === `${env.apiBasePath}/faculties`) { json(res, 200, await getFaculties()); return true; }
   if (url.pathname === `${env.apiBasePath}/programs`) { json(res, 200, await getPrograms(toNumber(url.searchParams.get('facultyId')))); return true; }
   if (url.pathname === `${env.apiBasePath}/program-courses`) {
-    json(res, 200, await getProgramCourses({ facultyId: toNumber(url.searchParams.get('facultyId')), programId: toNumber(url.searchParams.get('programId')), yearNo: toNumber(url.searchParams.get('yearNo')), semesterNo: toNumber(url.searchParams.get('semesterNo')) }, { includeHidden: url.searchParams.get('audience') === 'admin' }));
+    json(res, 200, await getProgramCourses({ facultyId: toNumber(url.searchParams.get('facultyId')), programId: toNumber(url.searchParams.get('programId')), yearNo: toNumber(url.searchParams.get('yearNo')), semesterNo: toNumber(url.searchParams.get('semesterNo')) }, { includeHidden: user?.role !== 'student' }));
     return true;
   }
   return false;

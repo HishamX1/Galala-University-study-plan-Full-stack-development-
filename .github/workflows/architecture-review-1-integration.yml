@@ -143,9 +143,12 @@ jobs:
           npm run test:signup-rate-limit &&
           npm run test:security-headers &&
           npm run test:api-config &&
+          npm run test:doctor-contract &&
+          npm run test:session-restoration &&
+          npm run test:catalog-cache-contract &&
+          npm run test:student-navigation-contract &&
           npm run test:error-disclosure &&
           npm run test:foundation &&
-          npm run test:doctor-contract &&
           npm run test:dashboard &&
           npm run check:support-pagination &&
           npm run test:support-pagination &&
@@ -160,6 +163,7 @@ jobs:
           npm run test:auth &&
           npm run test:session &&
           npm run test:student-portal &&
+          npm run test:catalog-cache &&
           npm run test:recycle-bin &&
           npm run test:admin-transactions &&
           npm run test:admin-import-staging &&

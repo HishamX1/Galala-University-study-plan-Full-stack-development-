@@ -10,7 +10,7 @@ Use this skill for release-readiness reviews, deployment preparation, and releas
 ## Non-negotiable boundaries
 
 1. Read `AGENTS.md` first, then inspect the repository state and relevant files.
-2. The canonical tree is root `backend/` + `frontend/`, root `package.json`, root `render.yaml`, root `netlify.toml`, and ordered `supabase/migrations/`. Treat `modernization/` as a duplicate/legacy tree; do not copy from it or include it in runtime/deployment conclusions.
+2. The canonical tree is root `backend/` + `frontend/`, root `package.json`, root `render.yaml`, root `vercel.json`, and ordered `supabase/migrations/`. Vercel assumes the repository root and publishes `frontend/`; private dashboard settings remain owner-verified. Treat `modernization/` as a duplicate/legacy tree; do not copy from it or include it in runtime/deployment conclusions.
 3. Do not deploy, push, commit, apply migrations, seed, bootstrap accounts, alter production configuration, or run destructive database operations unless the user explicitly authorizes that exact action. A release review alone does not authorize any of these.
 4. Never expose secret values in output. Report names, presence, and safe classifications only. Do not remove suspicious backup or legacy files; report them.
 5. Never use `git add .` blindly. Preserve unrelated work and review the final diff if changes were explicitly requested.
@@ -31,7 +31,7 @@ Trace the root `package.json` start command to `backend/src/server.js`. Verify r
 
 ### 4. Frontend deployment readiness
 
-Confirm the canonical publish directory is `frontend/`, inspect root `netlify.toml` redirects and security headers, and trace frontend API configuration to its production origin. Search frontend source/config for accidental `localhost`, `127.0.0.1`, credentials, database access, or references that would publish `modernization/`. Check CSP `connect-src`, HTTPS, cookies, and cross-origin compatibility against the actual API contract. Do not silently add/remove origins or weaken CSP.
+Confirm the repository-root Vercel project assumption and `frontend/` output directory. Inspect root `vercel.json` routes and security headers, and trace frontend API configuration to its production origin. Search frontend source/config for accidental `localhost`, `127.0.0.1`, credentials, database access, or references that would publish `modernization/`. Check CSP `connect-src`, HTTPS, cookies, and cross-origin compatibility against the actual API contract. Do not silently add/remove origins or weaken CSP. Repository checks cannot verify private Vercel dashboard settings.
 
 ### 5. Database and migration safety
 
@@ -55,7 +55,7 @@ End every review with:
 1. Overall readiness: `READY`, `READY WITH WARNINGS`, or `NOT READY`.
 2. Exact blockers, warnings, and accepted risks, including classification and evidence.
 3. Checks/tests completed, skipped, and their outcomes.
-4. Deployment configuration status for Render, Netlify, frontend API origin, environment variables, CORS/cookies, database/migrations, and health behavior.
+4. Deployment configuration status for Render, Vercel, frontend API origin, environment variables, CORS/cookies, database/migrations, and health behavior.
 5. Rollback/readiness assessment and the recommended next action.
 
 If no release review was requested and the task would require mutation, stop and ask for explicit scope. This skill does not itself deploy, push, commit, modify production infrastructure, or alter application code.

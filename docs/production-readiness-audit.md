@@ -4,7 +4,7 @@ Audit date: 2026-07-18
 
 ## Scope and evidence
 
-Reviewed the Node runtime, API routing, authentication bootstrap, database access layer, Supabase migrations, Render and Netlify manifests, frontend API configuration, scripts, and deployment documentation. `npm run check` passes. Production-mode `npm run doctor` passes against the configured Supabase database, including canonical/authentication table and migration-history checks.
+Reviewed the Node runtime, API routing, authentication bootstrap, database access layer, Supabase migrations, Render and Vercel configuration, frontend API configuration, scripts, and deployment documentation. This 2026-07-18 audit snapshot describes the repository state at that time and predates later hosting changes.
 
 ## Issues found and fixed
 
@@ -13,9 +13,9 @@ Reviewed the Node runtime, API routing, authentication bootstrap, database acces
 | Only `.env` was read. | Environment-specific and local deployment settings could be silently ignored. | Load `.env`, then `.env.development`/`.env.production`, then `.env.local`; host values remain highest priority. |
 | Startup and API errors could surface low-level database messages. | Leaks provider/network details and slows incident diagnosis. | Added sanitized database diagnostic categories for missing URL, invalid credentials, unreachable host, and generic connection failure. |
 | Bootstrap did not verify connection or migration state. | Operators could enter credentials before discovering the database was unavailable or auth tables absent. | Bootstrap now validates connectivity and both authentication tables before prompting. |
-| No operational preflight command existed. | Deployment configuration and migrations were easy to miss. | Added `npm run doctor` with green/red checks for configuration, database/auth tables, bootstrap state, frontend config, Render, and Netlify. |
+| No operational preflight command existed. | Deployment configuration and migrations were easy to miss. | Added `npm run doctor` with green/red checks for configuration, database/auth tables, bootstrap state, frontend config, Render, and the then-current frontend host configuration. |
 | Render manifest lacked production JWT and cookie settings and used non-deterministic install. | Production could fail at startup or deploy differing dependency trees. | Added `NODE_ENV`, `JWT_SECRET`, cookie settings, and `npm ci`. |
-| Netlify-to-Render cookie settings were not explicit. | Cross-origin login sessions can fail in browsers. | Added `COOKIE_SAME_SITE` validation and production `None`/secure Render configuration. |
+| Cross-origin frontend-to-Render cookie settings were not explicit. | Cross-origin login sessions can fail in browsers. | Added `COOKIE_SAME_SITE` validation and production `None`/secure Render configuration. |
 | Smoke test still assumed anonymous API access. | It no longer tested the secured deployment and could mislead operators. | It now requires Super Admin smoke credentials, logs in first, and clearly skips if absent. |
 | `.env.example` contained obsolete data-mode/seed settings and wildcard CORS advice. | Misconfiguration risk. | Replaced with current auth, cookie, database, and smoke-test settings. |
 | Malformed JWT signatures could cause a server error. | Invalid client input could become a 500 response. | Added a signature-length check before timing-safe comparison. |
@@ -40,3 +40,7 @@ This audit is historical and was not re-run as a production readiness check on 2
 ## Readiness score
 
 **92/100 was the score assigned on 2026-07-18 only.** It is not a current readiness verdict: production connectivity/migration state and the complete current dependency audit have not been reverified in this pass.
+
+## Hosting and evidence correction (2026-10-21; updated 2026-10-24)
+
+The project owner confirmed Vercel as the active frontend host. This 2026-10-21 snapshot predated the source configuration cleanup. The current checkout removes the legacy manifest, adds root `vercel.json`, and checks its routes and headers in `scripts/doctor.js`; historical Netlify references in this audit describe only the older configuration. The Vercel project-root assumption and private dashboard settings remain unverified. See `docs/architecture-assessment.md` for dated migration/provider verification limitations.

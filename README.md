@@ -4,7 +4,7 @@ The owner-confirmed hosting architecture is:
 
 `Vercel frontend -> Render backend API -> Supabase Postgres`
 
-Vercel project settings are managed in its dashboard and are not independently verified by this repository. Root `netlify.toml` is retained legacy configuration and is not evidence of active hosting behavior.
+The repository-root `vercel.json` configures the static output directory, direct routes, and security headers. The Vercel project must use the repository root and `frontend/` output; private dashboard settings still require owner-side verification.
 
 The canonical application lives at the repository root. The previously referenced `modernization/` duplicate is absent from this checkout; root `backend/` and `frontend/` are the application trees present here.
 
@@ -15,7 +15,7 @@ The canonical application lives at the repository root. The previously reference
 - Landing page: `frontend/index.html`
 - Backend API: `backend/src/server.js`
 - Active frontend host: Vercel (dashboard settings require owner-side verification)
-- Legacy frontend config retained for later cleanup: `netlify.toml`
+- Vercel static frontend config: `vercel.json` (repository root is the required project root)
 - Render backend config: `render.yaml`
 - Supabase schema: the complete ordered migration chain in `supabase/migrations/`
 - Supabase seed: `supabase/seed.sql`
@@ -63,7 +63,7 @@ Then open:
 1. Deploy the backend on Render from the repository root.
 2. Set `DATABASE_URL`, `PG_SSL=true`, `API_BASE_PATH=/api`, and `CORS_ORIGIN=<your Vercel production origin>`.
 3. Set the frontend backend URL in `frontend/config.js`, for example `window.__GU_API_BASE__ = 'https://your-render-backend.onrender.com/api';`.
-4. Deploy the static frontend through the owner-managed Vercel project. Confirm its project root/output and route handling publish the files under `frontend/`; this repository has no Vercel project configuration. Verify `/`, `/student`, and `/admin` in the deployed browser. Do not use `netlify.toml` as the source of active Vercel settings.
+4. Deploy the static frontend through the owner-managed Vercel project. Configure the repository root as project root; `vercel.json` selects `frontend/` as output and defines `/`, `/student`, `/admin`, and security headers. Verify these routes and headers in the authorized Vercel project/browser because private dashboard settings cannot be verified from source.
 
 ## Verification
 

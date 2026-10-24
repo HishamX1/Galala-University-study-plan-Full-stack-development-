@@ -6,6 +6,28 @@ import { findActiveProgramCourseDetail, findActiveProgramCourseSummary, findDupl
 import { updateCourse, upsertCourse } from '../repositories/courseRepository.js';
 import { createPrerequisiteRow, listActivePrerequisiteRows, listRelationshipImpactRows, replacePrerequisiteRows, softDeletePrerequisiteRow, softDeletePrerequisitesForCourses, updatePrerequisiteVisibilityRow } from '../repositories/prerequisiteRepository.js';
 import { AppError } from '../utils/errors.js';
+import { CatalogRevisionChangedError, createRevisionedCatalogCache } from './catalogCache.js';
+
+async function readCatalogRevision() {
+  const result = await query('SELECT public.get_catalog_revision()::text AS revision');
+  if (!result.rows[0]?.revision) throw new Error('CATALOG_REVISION_UNAVAILABLE');
+  return result.rows[0].revision;
+}
+
+async function buildCatalogSnapshot(audience) {
+  const options = { includeHidden: audience === 'admin' };
+  const [faculties, programs, programCourses] = await Promise.all([
+    getFaculties(),
+    getPrograms(),
+    getProgramCourses({}, options)
+  ]);
+  return { faculties, programs, programCourses };
+}
+
+const catalogCache = createRevisionedCatalogCache({
+  readRevision: readCatalogRevision,
+  buildCatalog: buildCatalogSnapshot
+});
 
 function duplicate(error) {
   return String(error?.code) === '23505';
@@ -527,10 +549,13 @@ export async function updatePrerequisiteVisibility(programCourseId, prerequisite
 }
 
 export async function getCatalog(options = {}) {
-  const [faculties, programs, programCourses] = await Promise.all([
-    getFaculties(),
-    getPrograms(),
-    getProgramCourses({}, options)
-  ]);
-  return { faculties, programs, programCourses };
+  const audience = options.includeHidden === true ? 'admin' : 'student';
+  try {
+    return await catalogCache.getCatalog(audience);
+  } catch (error) {
+    if (error instanceof CatalogRevisionChangedError) {
+      throw new AppError('The catalog changed repeatedly while it was being loaded. Please retry.', 503, 'CATALOG_CHANGED');
+    }
+    throw error;
+  }
 }

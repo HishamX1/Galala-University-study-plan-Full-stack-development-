@@ -25,7 +25,7 @@ The canonical source tree is the repository root:
 - `frontend/`: static landing, student, admin, authentication, shared-session, and API-client code.
 - `scripts/`: project checks and regression tests.
 - `supabase/`: migrations, seed data, and Supabase configuration.
-- `render.yaml`, `netlify.toml`, and root `package.json`: canonical deployment and project configuration.
+- `render.yaml`, root `vercel.json`, and root `package.json`: canonical deployment and project configuration. Vercel assumes the repository root and publishes `frontend/`; private dashboard settings are not source-controlled.
 
 `modernization/` is an older duplicated implementation retained temporarily for migration verification. Do not treat it as runtime source, copy changes between trees, or delete it without explicit evidence and instruction.
 

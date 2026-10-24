@@ -41,25 +41,16 @@
       </div>
       <nav class="gu-header-nav" aria-label="Primary navigation">
         <a href="../index.html">Home</a>
-        <a href="../index.html#overview" aria-label="Overview">Overview</a>
-        <button type="button" id="programs-nav-btn" class="gu-header-nav-btn" aria-haspopup="true" aria-expanded="false">Programs</button>
+        <button type="button" id="faculty-nav-btn" class="gu-header-nav-btn" aria-controls="overview-view">Faculty</button>
+        <button type="button" id="programs-nav-btn" class="gu-header-nav-btn" aria-controls="overview-view">Programs</button>
         <a href="../dashboard.html" id="dashboard-link">Dashboard</a>
         <button type="button" id="student-sign-out" class="gu-header-nav-btn">Sign Out</button>
       </nav>
     </div>
 
-    <!-- Programs Dropdown -->
-    <div id="programs-dropdown" class="programs-dropdown" aria-hidden="true">
-      <div class="programs-dropdown-inner">
-        <div class="programs-dropdown-faculties" id="programs-dropdown-faculties">
-          <!-- Dynamically populated -->
-        </div>
-        <div class="programs-dropdown-flyout" id="programs-dropdown-flyout">
-          <!-- Dynamically populated on hover -->
-        </div>
-      </div>
-    </div>
   </header>
+
+  <p id="student-nav-status" class="sr-only" role="status" aria-live="polite"></p>
 
   <!-- ============================================
        MAIN CONTENT
@@ -168,7 +159,7 @@
           </div>
           <h3 class="gu-empty-title">Something went wrong</h3>
           <p class="gu-empty-text" id="error-message">Unable to load data. Please try again.</p>
-          <button class="gu-btn gu-btn--primary" onclick="location.reload()">Reload</button>
+          <button class="gu-btn gu-btn--primary" id="retry-catalog-btn">Retry loading catalog</button>
         </div>
 
         <!-- Empty State -->
@@ -196,7 +187,7 @@
               </svg>
               Back to Faculties
             </button>
-            <h2>Explore Programs</h2>
+            <h2 id="overview-title" tabindex="-1">Choose a Faculty</h2>
             <p class="text-muted">Select a faculty and program to view the study plan structure.</p>
           </div>
           <div id="faculty-grid" class="faculty-grid">
