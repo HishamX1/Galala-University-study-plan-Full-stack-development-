@@ -31,7 +31,11 @@ function applyCorsHeaders(req, res) {
 
 function unauthorized(res) { return json(res, 401, { error: 'Authentication required' }); }
 function forbidden(res) { return json(res, 403, { error: 'You do not have permission to access this resource' }); }
-function requirePermission(res, user, permission) { return hasPermission(user, permission) || forbidden(res); }
+function requirePermission(res, user, permission) {
+  if (hasPermission(user, permission)) return true;
+  forbidden(res);
+  return false;
+}
 function canAccess(user, req, pathname) {
   if (!user) return false;
   const isRead = req.method === 'GET';
@@ -186,12 +190,21 @@ export async function handleApi(req, res, url, { resolveCurrentUser = currentUse
     return json(res, 404, { error: 'API route not found' });
   } catch (error) {
     console.error(JSON.stringify({ requestId: req.requestId, event: 'api_error', name: error?.name, code: error?.code, message: String(error?.message || '').replace(/(?:password|token|secret|cookie)=?\S*/ig, '[redacted]') }));
+    // A controller can fail after it has already committed its response (for
+    // example, an async cleanup or logging step). At that point a JSON error
+    // response would be a second write and can raise ERR_HTTP_HEADERS_SENT.
+    // Preserve the original failure in logs, but leave the completed response
+    // untouched. If headers were sent but the body is still open, terminate it.
+    if (res.headersSent || res.writableEnded) {
+      if (!res.writableEnded && typeof res.destroy === 'function') res.destroy();
+      return true;
+    }
     if (error.message === 'INVALID_JSON') return json(res, 400, { error: 'Invalid JSON payload' });
-    if (error.message === 'PAYLOAD_TOO_LARGE' && url.pathname === `${env.apiBasePath}/notifications/read`) return json(res, 413, { error: 'Request body is too large.', code: 'PAYLOAD_TOO_LARGE' });
+    if (error.message === 'PAYLOAD_TOO_LARGE' && [`${env.apiBasePath}/notifications/read`, `${env.apiBasePath}/notifications/read-all`].includes(url.pathname)) return json(res, 413, { error: 'Request body is too large.', code: 'PAYLOAD_TOO_LARGE' });
     if (error.message === 'PAYLOAD_TOO_LARGE') return json(res, 413, { error: 'Import file is too large (maximum 12 MB).' });
     if (error.message === 'PG_DRIVER_MISSING') return json(res, 500, { error: 'PostgreSQL driver is missing. Install pg.' });
     if (String(error.message || '').startsWith('DB_')) return json(res, 503, { error: databaseDiagnosticMessage(error) });
-    if (String(error.message || '').startsWith('FK_')) return json(res, 400, { error: 'Invalid relation id provided.' });
+    if (String(error.message || '').startsWith('FK_') || ['23503', '23514'].includes(String(error.code))) return json(res, 400, { error: 'Invalid relation id provided.' });
     if (error.code === '23505') return json(res, 409, { error: String(error.constraint || '').includes('student_id') ? 'Student ID is already in use.' : 'Email is already in use.' });
     if (isSafeClientError(error)) return json(res, 400, { error: error.message });
     const mapped = toErrorResponse(error, req.requestId);

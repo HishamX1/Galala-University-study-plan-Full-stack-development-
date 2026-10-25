@@ -6,6 +6,7 @@ import { env, validateStartupConfig } from './config/env.js';
 import { handleApi } from './routes/catalogRoutes.js';
 import { databaseDiagnosticMessage, ensureDataStore } from './db/client.js';
 import { applySecurityHeaders, assignRequestId, safeRequestLog } from './middleware/requestContext.js';
+import { writeUnexpectedError } from './middleware/http.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -54,41 +55,43 @@ try {
 
 const server = http.createServer(async (req, res) => {
   const started = Date.now();
-  assignRequestId(req, res);
-  applySecurityHeaders(res, req);
-  const url = new URL(req.url, `http://${req.headers.host}`);
+  try {
+    assignRequestId(req, res);
+    applySecurityHeaders(res, req);
+    const url = new URL(req.url, `http://${req.headers.host}`);
 
-  const apiHandled = await handleApi(req, res, url);
-  if (apiHandled !== false) {
-    safeRequestLog(req, res, started);
-    return;
+    const apiHandled = await handleApi(req, res, url);
+    if (apiHandled !== false) return;
+
+    if (url.pathname === '/') {
+      serveFile(res, path.join(frontendDir, 'index.html'));
+    } else if (url.pathname === '/login' || url.pathname === '/student-login') {
+      serveFile(res, path.join(frontendDir, 'student-login.html'));
+    } else if (url.pathname === '/admin-login') {
+      serveFile(res, path.join(frontendDir, 'admin-login.html'));
+    } else if (url.pathname === '/student-signup') {
+      serveFile(res, path.join(frontendDir, 'student-signup.html'));
+    } else if (url.pathname === '/reset-password') {
+      serveFile(res, path.join(frontendDir, 'reset-password.html'));
+    } else if (url.pathname === '/password-reset-request') {
+      serveFile(res, path.join(frontendDir, 'password-reset-request.html'));
+    } else if (url.pathname === '/denied') {
+      serveFile(res, path.join(frontendDir, 'denied.html'));
+    } else if (url.pathname === '/student') {
+      serveFile(res, path.join(frontendDir, 'student', 'index.html'));
+    } else if (url.pathname === '/admin') {
+      serveFile(res, path.join(frontendDir, 'admin', 'index.html'));
+    } else {
+      const cleaned = url.pathname.replace(/^\/+/, '');
+      const filePath = path.join(frontendDir, cleaned);
+      serveFile(res, filePath);
+    }
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'request_error', requestId: req.requestId, name: error?.name, message: String(error?.message || 'Request failed') }));
+    writeUnexpectedError(res, req.requestId);
+  } finally {
+    if (req.requestId) safeRequestLog(req, res, started);
   }
-
-  if (url.pathname === '/') {
-    serveFile(res, path.join(frontendDir, 'index.html'));
-  } else if (url.pathname === '/login' || url.pathname === '/student-login') {
-    serveFile(res, path.join(frontendDir, 'student-login.html'));
-  } else if (url.pathname === '/admin-login') {
-    serveFile(res, path.join(frontendDir, 'admin-login.html'));
-  } else if (url.pathname === '/student-signup') {
-    serveFile(res, path.join(frontendDir, 'student-signup.html'));
-  } else if (url.pathname === '/reset-password') {
-    serveFile(res, path.join(frontendDir, 'reset-password.html'));
-  } else if (url.pathname === '/password-reset-request') {
-    serveFile(res, path.join(frontendDir, 'password-reset-request.html'));
-  } else if (url.pathname === '/denied') {
-    serveFile(res, path.join(frontendDir, 'denied.html'));
-  } else if (url.pathname === '/student') {
-    serveFile(res, path.join(frontendDir, 'student', 'index.html'));
-  } else if (url.pathname === '/admin') {
-    serveFile(res, path.join(frontendDir, 'admin', 'index.html'));
-  } else {
-    const cleaned = url.pathname.replace(/^\/+/, '');
-    const filePath = path.join(frontendDir, cleaned);
-    serveFile(res, filePath);
-  }
-
-  safeRequestLog(req, res, started);
 });
 
 server.listen(env.port, () => {
