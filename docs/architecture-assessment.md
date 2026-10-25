@@ -4,7 +4,7 @@
 
 The application is a static HTML/CSS/JavaScript frontend served by Vercel (current host as confirmed by the owner), a Node HTTP API, and Supabase PostgreSQL. The browser calls only `/api`; database credentials remain server-side. The principal runtime path is `server -> route/controller -> service -> repository -> PostgreSQL`. Root `vercel.json` defines static output, direct routes, and security headers; the Vercel dashboard project-root assumption and private settings still require owner-side verification.
 
-The canonical academic catalog is `faculties`, `programs`, `courses`, `program_courses`, and `course_prerequisites`. User, refresh-session, recovery, communications, complaints, audit, and backup tables are separate operational domains. `program_courses.year_no` and `semester_no` supply the UI grouping; they are not student progress.
+The canonical academic catalog is `faculties`, `programs`, `courses`, `program_courses`, and `course_prerequisites`, with prerequisite groups now layered alongside the legacy links. User, refresh-session, recovery, communications, complaints, audit, and backup tables are separate operational domains. Student-entered, unverified academic planning is stored separately in `student_academic_profiles` and `student_course_attempts`; `program_courses.year_no` and `semester_no` remain catalog grouping, not the actual term of a student's attempt.
 
 ## Findings and risks
 

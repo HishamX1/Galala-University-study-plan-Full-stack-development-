@@ -69,7 +69,10 @@
     "test:session-restoration": "node scripts/session-restoration-test.js",
     "test:catalog-cache-contract": "node scripts/catalog-cache-contract-test.js",
     "test:student-navigation-contract": "node scripts/student-navigation-contract-test.js",
-    "test:catalog-cache": "node scripts/catalog-cache-integration-test.js"
+    "test:catalog-cache": "node scripts/catalog-cache-integration-test.js",
+    "test:academic-progress": "node scripts/academic-progress-contract-test.js",
+    "test:academic-progress-db": "node scripts/academic-progress-database-integration-test.js",
+    "check:academic-progress": "node --check backend/src/academic/gradeScale.js && node --check backend/src/repositories/studentProgressRepository.js && node --check backend/src/services/studentProgressService.js && node --check backend/src/controllers/studentProgressController.js && node --check scripts/academic-progress-contract-test.js && node --check scripts/academic-progress-database-integration-test.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

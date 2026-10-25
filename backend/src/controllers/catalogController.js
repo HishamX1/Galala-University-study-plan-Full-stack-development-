@@ -1,7 +1,7 @@
 import { json, parseBody } from '../middleware/http.js';
 import { validateEntityId } from '../validation/schemas.js';
 import { env } from '../config/env.js';
-import { addPrerequisiteRelation, createFaculty, createProgram, createProgramCourse, deleteFaculty, deleteProgram, deleteProgramCourse, deletePrerequisiteRelation, getCatalog, getFaculties, getPrerequisites, getProgramCourseDeleteImpact, getProgramCourses, getProgramDeleteImpact, getPrograms, updateFaculty, updatePrerequisites, updatePrerequisiteVisibility, updateProgram, updateProgramCourse } from '../services/catalogService.js';
+import { addPrerequisiteRelation, createFaculty, createProgram, createProgramCourse, deleteFaculty, deleteProgram, deleteProgramCourse, deletePrerequisiteRelation, getCatalog, getFaculties, getPrerequisites, getProgramCourseDeleteImpact, getProgramCourses, getProgramDeleteImpact, getPrograms, updateFaculty, updatePrerequisiteGroups, updatePrerequisites, updatePrerequisiteVisibility, updateProgram, updateProgramCourse } from '../services/catalogService.js';
 import { validateExpectedVersion, validateFaculty, validateFacultyPatch, validatePrerequisites, validatePrerequisiteRelation, validatePrerequisiteVisibility, validateProgram, validateProgramCourse, validateProgramCoursePatch } from '../validation/schemas.js';
 
 // Shared HTTP translation for the existing catalog mutation endpoints. Domain
@@ -105,6 +105,13 @@ export async function handleCatalogRequest(req, res, url, user) {
       if (versionErr) return json(res, 400, { error: versionErr });
       return json(res, 200, { prerequisiteCourseIds: await updatePrerequisites(id, body.prerequisiteCourseIds || [], body.expectedVersion?.updatedAt, actor) });
     }
+  }
+  if (req.method === 'PUT' && url.pathname.match(new RegExp(`^${env.apiBasePath}/program-courses/\\d+/prerequisite-groups$`))) {
+    const id=toNumber(url.pathname.split('/').at(-2));
+    const idErr=validateEntityId(id,'program course id'); if(idErr) return json(res,400,{error:idErr});
+    const body=await parseBody(req);
+    const updated=await updatePrerequisiteGroups(id,body,actor);
+    return updated ? json(res,200,updated) : json(res,404,{error:'Program course not found'});
   }
   if (req.method === 'PUT' && url.pathname.match(new RegExp(`^${env.apiBasePath}/program-courses/\\d+/prerequisites/\\d+/visibility$`))) {
     const parts = url.pathname.split('/');

@@ -4,7 +4,7 @@ import { findActiveFaculty, insertFaculty, listActiveFaculties, listActiveFacult
 import { findActiveProgram, insertProgram, listActivePrograms, softDeleteProgram, softDeleteProgramsForFaculty, updateActiveProgram } from '../repositories/programRepository.js';
 import { findActiveProgramCourseDetail, findActiveProgramCourseSummary, findDuplicateProgramCourse, findProgramCourseWithCourse, insertProgramCourse, listActiveProgramCourseSummaries, listActiveProgramCourses, programCourseExists, programCourseRecordExists, softDeleteProgramCourse, softDeleteProgramCourses, touchProgramCourse, updateProgramCourseRow } from '../repositories/programCourseRepository.js';
 import { updateCourse, upsertCourse } from '../repositories/courseRepository.js';
-import { createPrerequisiteRow, listActivePrerequisiteRows, listRelationshipImpactRows, replacePrerequisiteRows, softDeletePrerequisiteRow, softDeletePrerequisitesForCourses, updatePrerequisiteVisibilityRow } from '../repositories/prerequisiteRepository.js';
+import { createPrerequisiteRow, listActivePrerequisiteRows, listPrerequisiteGroupRows, listRelationshipImpactRows, softDeletePrerequisiteRow, softDeletePrerequisitesForCourses, updatePrerequisiteVisibilityRow } from '../repositories/prerequisiteRepository.js';
 import { AppError } from '../utils/errors.js';
 import { CatalogRevisionChangedError, createRevisionedCatalogCache } from './catalogCache.js';
 
@@ -328,7 +328,17 @@ export async function deleteProgram(id, expectedVersion, actor = null) {
 export async function getProgramCourses(filters = {}, options = {}) {
   const rows = await listActiveProgramCourses(filters, { query });
   const prereqs = await prerequisiteMap(rows.map((row) => row.id), null, options);
-  return rows.map((row) => mapProgramCourse(row, prereqs.get(toInt(row.id)) || []));
+  const groupRows = await listPrerequisiteGroupRows(rows.map((row) => row.id), options.includeHidden === true, { query });
+  const groupsByCourse = new Map();
+  for (const item of groupRows) {
+    const courseId = toInt(item.course_id);
+    const groups = groupsByCourse.get(courseId) || new Map();
+    const group = groups.get(toInt(item.group_id)) || { id: toInt(item.group_id), type: item.group_type, label: item.label, position: toInt(item.position), members: [] };
+    group.members.push({ courseId: toInt(item.prerequisite_course_id), minimumGrade: item.minimum_grade, position: toInt(item.member_position) });
+    groups.set(toInt(item.group_id), group);
+    groupsByCourse.set(courseId, groups);
+  }
+  return rows.map((row) => ({ ...mapProgramCourse(row, prereqs.get(toInt(row.id)) || []), prerequisiteGroups: [...(groupsByCourse.get(toInt(row.id))?.values() || [])] }));
 }
 
 export async function createProgramCourse(data, actor = null) {
@@ -357,6 +367,52 @@ export async function createProgramCourse(data, actor = null) {
     if (duplicate(error)) return null;
     throw error;
   }
+}
+
+function normalizePrerequisiteGroups(body, courseId) {
+  const mandatory=body?.mandatoryCourseIds; const alternatives=body?.alternativeGroups;
+  if(!Array.isArray(mandatory)||!Array.isArray(alternatives)||alternatives.some(group=>!group||typeof group.label!=='string'||!group.label.trim()||group.label.trim().length>120||!Array.isArray(group.prerequisiteCourseIds)||group.prerequisiteCourseIds.length<2)) throw new AppError('Invalid prerequisite groups.',400,'VALIDATION_ERROR');
+  const allIds=[...mandatory.map(Number),...alternatives.flatMap(group=>group.prerequisiteCourseIds.map(Number))];
+  if(allIds.some(id=>!Number.isInteger(id)||id<=0)||new Set(allIds).size!==allIds.length||allIds.includes(Number(courseId))) throw new AppError('Invalid prerequisite course selection.',400,'VALIDATION_ERROR');
+  return {mandatory:mandatory.map(Number),alternatives,allIds};
+}
+
+async function persistPrerequisiteGroups(client,courseId,body,{recordAudit=false,actor=null}={}) {
+  const {mandatory,alternatives,allIds}=normalizePrerequisiteGroups(body,courseId);
+  const target=await client.query('SELECT program_id FROM public.program_courses WHERE id=$1 AND deleted_at IS NULL FOR UPDATE',[courseId]);
+  if(!target.rowCount) return false;
+  if(allIds.length) {
+    const valid=await client.query('SELECT id FROM public.program_courses WHERE id=ANY($1::bigint[]) AND program_id=$2 AND deleted_at IS NULL',[allIds,target.rows[0].program_id]);
+    if(valid.rowCount!==allIds.length) throw new AppError('Prerequisites must be active courses in the same program.',400,'INVALID_PREREQUISITE');
+    await assertNoPrerequisiteCycle(client,courseId,allIds);
+  }
+  const previous=await client.query('SELECT prerequisite_course_id,visible_to_students FROM public.course_prerequisites WHERE course_id=$1',[courseId]);
+  const visibility=new Map(previous.rows.map(row=>[Number(row.prerequisite_course_id),row.visible_to_students!==false]));
+  await client.query('DELETE FROM public.course_prerequisite_groups WHERE course_id=$1',[courseId]);
+  await client.query('DELETE FROM public.course_prerequisites WHERE course_id=$1',[courseId]);
+  const saveGroup=async(type,label,members,position)=>{
+    const inserted=await client.query('INSERT INTO public.course_prerequisite_groups(course_id,group_type,label,position) VALUES($1,$2,$3,$4) RETURNING id',[courseId,type,label,position]);
+    for(let i=0;i<members.length;i+=1){
+      const relation=await client.query('INSERT INTO public.course_prerequisites(course_id,prerequisite_course_id,visible_to_students) VALUES($1,$2,$3) RETURNING id',[courseId,members[i],visibility.get(members[i])??true]);
+      await client.query('INSERT INTO public.course_prerequisite_group_members(group_id,prerequisite_course_id,position,minimum_grade) VALUES($1,$2,$3,$4)',[inserted.rows[0].id,members[i],i,null]);
+      if(type==='mandatory') await client.query('UPDATE public.course_prerequisite_groups SET legacy_relation_id=$2 WHERE id=$1',[inserted.rows[0].id,relation.rows[0].id]);
+    }
+  };
+  for(let i=0;i<mandatory.length;i+=1) await saveGroup('mandatory','Required prerequisite',[mandatory[i]],i);
+  for(let i=0;i<alternatives.length;i+=1) await saveGroup('alternative',alternatives[i].label.trim(),alternatives[i].prerequisiteCourseIds.map(Number),mandatory.length+i);
+  if(recordAudit) await logAdminAction(client,{action:'Updated Prerequisite Groups',entity:'relation',entityId:courseId,newValues:body,description:'Updated mandatory and alternative prerequisite groups',actor});
+  return true;
+}
+
+async function assertNoPrerequisiteCycle(client,courseId,prerequisiteIds) {
+  if(!prerequisiteIds.length) return;
+  const result=await client.query(`WITH RECURSIVE walk(id,path) AS (
+    SELECT requested.id,ARRAY[requested.id]::bigint[] FROM unnest($1::bigint[]) AS requested(id)
+    UNION ALL SELECT cp.prerequisite_course_id,walk.path||cp.prerequisite_course_id
+      FROM walk JOIN public.course_prerequisites cp ON cp.course_id=walk.id AND cp.deleted_at IS NULL
+      WHERE cp.course_id<>$2 AND NOT cp.prerequisite_course_id=ANY(walk.path)
+  ) SELECT 1 FROM walk WHERE id=$2 LIMIT 1`,[prerequisiteIds,courseId]);
+  if(result.rowCount) throw new AppError('Prerequisite selection would create a cycle.',400,'INVALID_PREREQUISITE');
 }
 
 export async function updateProgramCourse(id, data, actor = null) {
@@ -390,7 +446,10 @@ export async function updateProgramCourse(id, data, actor = null) {
           if (!courseUpdate.rowCount) throw staleWrite();
         }
 
-        if (Array.isArray(data.prerequisiteCourseIds)) {
+        if (data.prerequisiteGroups !== undefined) {
+          const saved=await persistPrerequisiteGroups(client,id,data.prerequisiteGroups);
+          if(!saved) throw new AppError('Program course not found.',404,'NOT_FOUND');
+        } else if (Array.isArray(data.prerequisiteCourseIds)) {
           await replacePrerequisites(client, id, data.prerequisiteCourseIds);
         }
 
@@ -411,10 +470,31 @@ export async function updateProgramCourse(id, data, actor = null) {
 
 async function replacePrerequisites(client, courseId, prerequisiteCourseIds) {
   const ids = [...new Set(prerequisiteCourseIds.map(Number).filter((id) => id !== Number(courseId)))];
-  await replacePrerequisiteRows(courseId, ids, client);
+  await assertNoPrerequisiteCycle(client,courseId,ids);
+  const previous=await client.query('SELECT prerequisite_course_id,visible_to_students FROM public.course_prerequisites WHERE course_id=$1',[courseId]);
+  const visibility=new Map(previous.rows.map(row=>[Number(row.prerequisite_course_id),row.visible_to_students!==false]));
+  await client.query('DELETE FROM public.course_prerequisite_groups WHERE course_id=$1',[courseId]);
+  await client.query('DELETE FROM public.course_prerequisites WHERE course_id=$1',[courseId]);
   for (const prerequisiteCourseId of ids) {
     if (!(await programCourseRecordExists(prerequisiteCourseId, client))) throw new Error('FK_PROGRAM_COURSE');
   }
+  for (let position=0;position<ids.length;position+=1) {
+    const relation=await client.query('INSERT INTO public.course_prerequisites(course_id,prerequisite_course_id,visible_to_students) VALUES($1,$2,$3) RETURNING id',[courseId,ids[position],visibility.get(ids[position])??true]);
+    const group=await client.query("INSERT INTO public.course_prerequisite_groups(course_id,group_type,label,position,legacy_relation_id) VALUES($1,'mandatory','Required prerequisite',$2,$3) RETURNING id",[courseId,position,relation.rows[0].id]);
+    await client.query('INSERT INTO public.course_prerequisite_group_members(group_id,prerequisite_course_id,position) VALUES($1,$2,0)',[group.rows[0].id,ids[position]]);
+  }
+}
+
+export async function updatePrerequisiteGroups(courseId, body, actor = null) {
+  return withPostgresClient(async (client) => {
+    await client.query('BEGIN');
+    try {
+      const saved=await persistPrerequisiteGroups(client,courseId,body,{recordAudit:true,actor});
+      if(!saved) { await client.query('ROLLBACK'); return false; }
+      await client.query('COMMIT');
+      return getProgramCourseById(courseId);
+    } catch(error) { await client.query('ROLLBACK').catch(()=>{}); throw error; }
+  });
 }
 
 export async function getProgramCourseDeleteImpact(id) {
@@ -497,7 +577,10 @@ export async function addPrerequisiteRelation(programCourseId, prerequisiteCours
       try {
         const touched = await touchProgramCourse(programCourseId, client, expectedUpdatedAt);
         if (!touched.rowCount && expectedUpdatedAt && await programCourseExists(programCourseId, client)) throw staleWrite();
+        await assertNoPrerequisiteCycle(client,programCourseId,[Number(prerequisiteCourseId)]);
         const rows = [await createPrerequisiteRow(programCourseId, prerequisiteCourseId, client)];
+        const group=await client.query("INSERT INTO public.course_prerequisite_groups(course_id,group_type,label,legacy_relation_id) VALUES($1,'mandatory','Required prerequisite',$2) RETURNING id",[programCourseId,rows[0].id]);
+        await client.query('INSERT INTO public.course_prerequisite_group_members(group_id,prerequisite_course_id,position) VALUES($1,$2,0)',[group.rows[0].id,prerequisiteCourseId]);
         await logAdminAction(client, { action: 'Created Relation', entity: 'relation', entityId: rows[0].id, newValues: rows[0], description: 'Created prerequisite relationship', actor });
         await client.query('COMMIT');
         return mapPrerequisiteRelation(rows[0]);

@@ -28,7 +28,8 @@ const state = {
   data: {
     faculties: [],
     programs: [],
-    programCourses: []
+    programCourses: [],
+    academicProgress: null
   }
 };
 
@@ -550,11 +551,16 @@ function showHierarchyView(courseId) {
   if (!course) return;
   addHistory('course', course.id, course.code);
   const prerequisites = (course.prerequisiteCourseIds || []).map(courseById).filter(Boolean);
+  const prerequisiteGroups = Array.isArray(course.prerequisiteGroups) && course.prerequisiteGroups.length
+    ? course.prerequisiteGroups.map(group => ({ ...group, members: (group.members || []).map(member => courseById(member.courseId)).filter(Boolean) }))
+    : prerequisites.map(item => ({ type: 'mandatory', label: 'Required prerequisite', members: [item] }));
+  const mandatoryPrerequisites = prerequisiteGroups.filter(group => group.type !== 'alternative').flatMap(group => group.members);
+  const alternativePrerequisiteGroups = prerequisiteGroups.filter(group => group.type === 'alternative');
   const dependents = state.data.programCourses.filter((item) => (item.prerequisiteCourseIds || []).includes(course.id));
   elements.modalTitle.textContent = `Course Hierarchy - ${course.code}`;
   elements.modalBody.innerHTML = `
     <div class="hierarchy-view-boxes">
-      <div class="hierarchy-level"><h6>Prerequisites (${escapeHtml(prerequisites.length)})</h6><div class="hierarchy-row">${prerequisites.map((item) => hierarchyCard(item)).join('') || '<span class="no-prereq">None</span>'}</div></div>
+      <div class="hierarchy-level"><h6>Prerequisites (${escapeHtml(prerequisites.length)})</h6><div class="hierarchy-prerequisite-groups">${mandatoryPrerequisites.length ? `<section class="hierarchy-prerequisite-group hierarchy-prerequisite-group--mandatory"><h6>All required</h6><div class="hierarchy-row" role="region" aria-label="Mandatory prerequisite courses">${mandatoryPrerequisites.map(item => hierarchyCard(item)).join('')}</div></section>` : ''}${alternativePrerequisiteGroups.map(group => `<section class="hierarchy-prerequisite-group hierarchy-prerequisite-group--alternative"><h6>Complete either one · ${escapeHtml(group.label)}</h6><div class="hierarchy-row" role="region" aria-label="Alternative prerequisite courses">${group.members.map(item => hierarchyCard(item)).join('') || '<span class="no-prereq">No active options</span>'}</div></section>`).join('') || (!mandatoryPrerequisites.length ? '<span class="no-prereq">None</span>' : '')}</div></div>
       <div class="hierarchy-center-wrapper">${hierarchyCard(course, true)}</div>
       <div class="hierarchy-level"><h6>Required For (${escapeHtml(dependents.length)})</h6><div class="hierarchy-row">${dependents.map((item) => hierarchyCard(item)).join('') || '<span class="no-prereq">None</span>'}</div></div>
     </div>
@@ -578,9 +584,21 @@ function showHierarchyView(courseId) {
 }
 
 function hierarchyCard(course, current = false) {
-  return `<div class="hierarchy-card ${current ? 'current' : ''}" data-course-id="${escapeHtml(course.id)}" ${current ? '' : 'role="button" tabindex="0"'} aria-label="${current ? 'Current course' : 'Open related course'} ${escapeHtml(course.code)}">
+  const progress = state.data.academicProgress;
+  const attempts = progress?.attempts?.filter(attempt => Number(attempt.programCourseId) === Number(course.id)) || [];
+  const latest = attempts.at(-1);
+  const status = !attempts.length ? { label:'Not completed', kind:'neutral' }
+    : attempts.length > 1 ? { label:`Attempts: ${attempts.map(attempt=>attempt.grade).join(' → ')} · repeat policy unresolved`, kind:'neutral' }
+      : latest.grade === 'F' ? { label:'Failed · F · Retake required', kind:'failed' }
+        : { label:`Completed · ${latest.grade}`, kind:'passed' };
+  const eligibility = progress?.profile?.programId === Number(course.programId) ? progress.eligibility?.[Number(course.id)] : null;
+  const successfulAlternative = eligibility?.explanation?.find(group=>group.type==='alternative'&&group.satisfied&&group.passed.length);
+  const eligibilityLabel = !eligibility ? '' : eligibility.status==='unknown' ? eligibility.reason
+    : eligibility.eligible && successfulAlternative ? `Eligible through ${successfulAlternative.label}: ${successfulAlternative.passed.join(', ')} passed; ${successfulAlternative.remaining.length ? `${successfulAlternative.remaining.join(', ')} remain alternatives` : 'alternative group satisfied'}`
+      : eligibility.eligible ? 'Eligible — prerequisite groups satisfied' : `Not yet eligible — ${eligibility.reason}`;
+  return `<div class="hierarchy-card ${current ? 'current' : ''} academic-status-${status.kind}" data-course-id="${escapeHtml(course.id)}" ${current ? '' : 'role="button" tabindex="0"'} aria-label="${current ? 'Current course' : 'Open related course'} ${escapeHtml(course.code)}">
     <div class="hierarchy-card-header"><span class="hierarchy-card-code">${escapeHtml(course.code)}</span></div>
-    <div class="hierarchy-card-body"><h4 class="hierarchy-card-title">${escapeHtml(course.name)}</h4></div>
+    <div class="hierarchy-card-body"><h4 class="hierarchy-card-title">${escapeHtml(course.name)}</h4><p class="hierarchy-academic-status">${escapeHtml(status.label)}</p>${eligibilityLabel ? `<p class="hierarchy-academic-eligibility">${escapeHtml(eligibilityLabel)}</p>` : ''}</div>
   </div>`;
 }
 
@@ -759,6 +777,8 @@ async function loadData({ preserveCurrent = false } = {}) {
   catalogLoadPromise = (async () => {
     try {
       state.data = normalizeCatalog(await fetchJson('/catalog'));
+      state.data.academicProgress = null;
+      try { state.data.academicProgress = await fetchJson('/student/academic-progress'); } catch { /* Progress remains optional until the academic migration is installed. */ }
       state.catalogLoadedAt = Date.now();
       updateStats();
       populateFilters();

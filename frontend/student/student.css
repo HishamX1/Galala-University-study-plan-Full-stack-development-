@@ -773,12 +773,6 @@
   flex-wrap: wrap;
 }
 
-.hierarchy-node-content:hover {
-  border-color: var(--gu-navy);
-  box-shadow: var(--shadow-md);
-  transform: translateX(4px);
-}
-
 .hierarchy-node-content.current {
   border-color: var(--gu-gold);
   background: var(--gu-cream);
@@ -873,12 +867,6 @@
   border: 1px solid var(--gu-gray-200);
   cursor: pointer;
   transition: all var(--transition-smooth);
-}
-
-.hierarchy-dependent-item:hover {
-  border-color: var(--gu-navy);
-  box-shadow: var(--shadow-md);
-  transform: translateX(4px);
 }
 
 .hierarchy-dependent-item.locked {
@@ -1178,11 +1166,20 @@
 
 .hierarchy-row {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
   gap: var(--space-4);
   width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scroll-snap-type: inline mandatory;
+  padding: 2px 2px var(--space-2);
 }
+
+.hierarchy-prerequisite-groups { display:grid; gap:var(--space-3); width:100%; }
+.hierarchy-prerequisite-group { width:100%; min-width:0; }
+.hierarchy-prerequisite-group h6 { margin:0 0 var(--space-2); color:var(--gu-gray-600); font-size:var(--text-xs); }
+.hierarchy-prerequisite-group--alternative { padding-top:var(--space-2); border-top:1px solid var(--gu-gray-200); }
 
 .hierarchy-card {
   display: flex;
@@ -1193,17 +1190,25 @@
   border: 1px solid var(--gu-gray-200);
   border-top: 3px solid var(--gu-navy);
   cursor: pointer;
-  transition: all var(--transition-smooth);
-  min-width: 160px;
-  max-width: 220px;
-  flex: 1;
+  transition: none;
+  min-width: 0;
+  max-width: none;
+  flex: 0 0 calc((100% - (2 * var(--space-4))) / 3);
+  scroll-snap-align: start;
 }
 
 .hierarchy-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 20px 42px rgba(0, 33, 71, 0.18);
-  border-color: var(--gu-navy);
+  transform: none;
+  box-shadow: 0 12px 28px rgba(0, 33, 71, 0.12);
+  border-color: var(--gu-gray-200);
 }
+
+.hierarchy-academic-status,.hierarchy-academic-eligibility { margin:var(--space-2) 0 0; font-size:var(--text-xs); color:var(--gu-gray-600); }
+.hierarchy-card.academic-status-passed { border-top-color:#16834a; }
+.hierarchy-card.academic-status-failed { border-top-color:#c62828; }
+.hierarchy-card.academic-status-passed .hierarchy-academic-status { color:#12683c; font-weight:700; }
+.hierarchy-card.academic-status-failed .hierarchy-academic-status { color:#a61b1b; font-weight:700; }
+@media (max-width: 700px) { .hierarchy-row .hierarchy-card { flex-basis:min(82vw, 240px); } }
 
 .hierarchy-card.current {
   border-color: var(--gu-gold);
@@ -1327,12 +1332,6 @@
   align-items: center;
   gap: var(--space-2);
   width: 100%;
-}
-
-.hierarchy-arrow {
-  font-size: var(--text-xl);
-  color: var(--gu-gold);
-  line-height: 1;
 }
 
 .hierarchy-center-card {

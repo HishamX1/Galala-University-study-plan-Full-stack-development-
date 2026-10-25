@@ -56,7 +56,7 @@ export function setupDialogs() {
   });
 }
 
-export function openFormDialog({ title, description, fields, submitLabel = 'Save', danger = false }) {
+export function openFormDialog({ title, description, fields, submitLabel = 'Save', danger = false, onOpen }) {
   previousFocus = document.activeElement;
   elements.dialog.title.textContent = title;
   elements.dialog.description.textContent = description || '';
@@ -70,6 +70,7 @@ export function openFormDialog({ title, description, fields, submitLabel = 'Save
 
   return new Promise((resolve) => {
     activeResolver = resolve;
+    onOpen?.(elements.dialog.fields);
     elements.dialog.form.onsubmit = (event) => {
       event.preventDefault();
       const formData = new FormData(elements.dialog.form);

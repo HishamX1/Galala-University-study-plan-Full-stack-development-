@@ -39,7 +39,7 @@ function countBy(rows, key) {
 }
 
 function csvEscape(value) {
-  const text = String(value ?? '');
+  const text = value && typeof value === 'object' ? JSON.stringify(value) : String(value ?? '');
   return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
@@ -73,6 +73,14 @@ function normalizedExport(catalog) {
     list.push(relation);
     requiredForByCourse.set(key, list);
   }
+  const groupsByCourse = new Map();
+  for (const row of catalog.prerequisiteGroups || []) {
+    const courseId=Number(row.course_id); const groups=groupsByCourse.get(courseId)||new Map();
+    const key=`${row.group_type}:${row.position}:${row.label}`;
+    const group=groups.get(key)||{type:row.group_type,label:row.label,position:Number(row.position),members:[]};
+    group.members.push({courseCode:row.prerequisite_code,minimumGrade:row.minimum_grade||null,visibleToStudents:row.visible_to_students!==false});
+    groups.set(key,group);groupsByCourse.set(courseId,groups);
+  }
   const courses = catalog.programCourses.map((course) => {
     const program = programById.get(Number(course.program_id));
     const faculty = facultyById.get(Number(program?.faculty_id));
@@ -84,7 +92,8 @@ function normalizedExport(catalog) {
       faculty: faculty?.name || '', program: program?.name || '', courseCode: course.code, courseName: course.name,
       year: course.year_no, semester: course.semester_no, credits: course.credits,
       visibility: relations.every((relation) => relation.visible_to_students !== false) ? 'Visible' : 'Contains hidden relations',
-      prerequisites: prerequisiteCodes.join('; '), requiredFor: requiredForCodes.join('; '), description: course.description || ''
+      prerequisites: prerequisiteCodes.join('; '), requiredFor: requiredForCodes.join('; '), description: course.description || '',
+      prerequisiteGroups: [...(groupsByCourse.get(Number(course.id))?.values() || [])]
     };
   });
   const prerequisites = catalog.relationships.map((relation) => ({
@@ -102,7 +111,7 @@ function normalizedExport(catalog) {
     exportedAt: new Date().toISOString(),
     faculties: catalog.faculties.map(({ id, name }) => ({ id, name })),
     programs: catalog.programs.map(({ id, faculty_id, name, duration_years }) => ({ id, facultyId: faculty_id, name, durationYears: duration_years })),
-    courses, prerequisites, requiredFor
+    courses, prerequisites, requiredFor, prerequisiteGroups: courses.map(course=>({courseCode:course.courseCode,groups:course.prerequisiteGroups}))
   };
 }
 
@@ -110,13 +119,13 @@ async function toWorkbookBuffer(data) {
   const workbook = new ExcelJS.Workbook();
   const sheets = [
     ['Faculty', data.faculties], ['Program', data.programs], ['Course', data.courses],
-    ['Prerequisites', data.prerequisites], ['Required For', data.requiredFor]
+    ['Prerequisites', data.prerequisites], ['Prerequisite Groups', data.prerequisiteGroups || []], ['Required For', data.requiredFor]
   ];
   for (const [name, rows] of sheets) {
     const worksheet = workbook.addWorksheet(name);
     if (rows.length) {
       worksheet.columns = Object.keys(rows[0]).map((key) => ({ header: key, key }));
-      rows.forEach((row) => worksheet.addRow(row));
+      rows.forEach((row) => worksheet.addRow(Object.fromEntries(Object.entries(row).map(([key,value])=>[key,value&&typeof value==='object'?JSON.stringify(value):value]))));
     }
   }
   return workbook.xlsx.writeBuffer({ useStyles: false, useSharedStrings: false });
@@ -488,6 +497,9 @@ async function validateImportRows(type, list, executor, maxErrors = Infinity) {
   const programIds = new Set(programs.rows.map((row) => Number(row.id)));
   const courseIds = new Set(programCourses.rows.map((row) => Number(row.id)));
   const courseCodeToId = new Map(programCourses.rows.map((row) => [row.code, Number(row.id)]));
+  const prerequisiteEdges=new Map();
+  for(const relation of relationships.rows){const list=prerequisiteEdges.get(Number(relation.course_id))||new Set();list.add(Number(relation.prerequisite_course_id));prerequisiteEdges.set(Number(relation.course_id),list)}
+  const reaches=(start,target)=>{const visited=new Set();const stack=[start];while(stack.length){const current=stack.pop();if(current===target)return true;if(visited.has(current))continue;visited.add(current);for(const next of prerequisiteEdges.get(current)||[])stack.push(next)}return false};
   for (const [index, row] of list.entries()) {
     const line = index + 1;
     if (!row || typeof row !== 'object' || Array.isArray(row) || !Object.keys(row).length) { addImportError(errors, line, 'Empty or malformed row', maxErrors); continue; }
@@ -528,12 +540,36 @@ async function validateImportRows(type, list, executor, maxErrors = Infinity) {
         if (!courseCodeToId.has(prerequisiteCode)) addImportError(errors, line, `Unknown prerequisite code: ${prerequisiteCode}`, maxErrors);
       }
     }
+    if (type === 'prerequisiteGroups') {
+      const target=programCourses.rows.find(item=>item.code===String(row.courseCode||'').trim().toLowerCase());
+      if(!target) addImportError(errors,line,'Unknown target course code',maxErrors);
+      if(!Array.isArray(row.groups)) addImportError(errors,line,'Groups must be an array',maxErrors);
+      for(const group of Array.isArray(row.groups)?row.groups:[]) {
+        if(!group || !['mandatory','alternative'].includes(group.type) || typeof group.label!=='string' || !group.label.trim() || !Array.isArray(group.members) || !group.members.length || (group.type==='mandatory' && group.members.length!==1) || (group.type==='alternative' && group.members.length<2)) addImportError(errors,line,'Invalid prerequisite group',maxErrors);
+        const groupMemberCodes=new Set();
+        for(const member of Array.isArray(group?.members)?group.members:[]) {
+          const memberCode=String(member.courseCode||'').trim().toLowerCase();
+          const related=programCourses.rows.find(item=>item.code===memberCode);
+          if(!related) addImportError(errors,line,`Unknown prerequisite code: ${member.courseCode}`,maxErrors);
+          else if(target && Number(related.program_id)!==Number(target.program_id)) addImportError(errors,line,'Prerequisites must belong to the target program',maxErrors);
+          else if(target && Number(related.id)===Number(target.id)) addImportError(errors,line,'A course cannot be its own prerequisite',maxErrors);
+          else if(target && reaches(Number(related.id),Number(target.id))) addImportError(errors,line,'Prerequisite group would create a cycle',maxErrors);
+          if(groupMemberCodes.has(memberCode)) addImportError(errors,line,'Duplicate member in prerequisite group',maxErrors);
+          groupMemberCodes.add(memberCode);
+          if(member?.minimumGrade!=null && !['A+','A','A-','B+','B','B-','C+','C','C-','D+','D','F'].includes(member.minimumGrade)) addImportError(errors,line,'Invalid minimum grade',maxErrors);
+          if(member?.visibleToStudents!=null && typeof member.visibleToStudents!=='boolean') addImportError(errors,line,'Visibility must be a boolean',maxErrors);
+        }
+        if(target&&Array.isArray(group?.members)) for(const member of group.members){const related=programCourses.rows.find(item=>item.code===String(member.courseCode||'').trim().toLowerCase());if(related){const list=prerequisiteEdges.get(Number(target.id))||new Set();list.add(Number(related.id));prerequisiteEdges.set(Number(target.id),list)}}
+      }
+    }
     if (type === 'relationships') {
       const courseId = Number(row.courseId ?? row.course_id) || courseCodeToId.get(String(row.courseCode ?? row.course_code ?? '').trim().toLowerCase());
       const prerequisiteCourseId = Number(row.prerequisiteCourseId ?? row.prerequisite_course_id) || courseCodeToId.get(String(row.prerequisiteCode ?? row.prerequisite_code ?? '').trim().toLowerCase());
       if (!courseId || !courseIds.has(courseId)) addImportError(errors, line, 'Unknown course', maxErrors);
       if (!prerequisiteCourseId || !courseIds.has(prerequisiteCourseId)) addImportError(errors, line, 'Unknown prerequisite course', maxErrors);
       if (courseId && prerequisiteCourseId && courseId === prerequisiteCourseId) addImportError(errors, line, 'Course cannot require itself', maxErrors);
+      if(courseId&&prerequisiteCourseId&&reaches(prerequisiteCourseId,courseId)) addImportError(errors,line,'Prerequisite relationship would create a cycle',maxErrors);
+      if(courseId&&prerequisiteCourseId){const list=prerequisiteEdges.get(courseId)||new Set();list.add(prerequisiteCourseId);prerequisiteEdges.set(courseId,list)}
     }
     const nameKey = type === 'programs' ? `${Number(row.facultyId ?? row.faculty_id)}:${String(row.name || '').toLowerCase()}` : String(row.name || '').toLowerCase();
     if (nameKey && seenNames.has(nameKey)) addImportError(errors, line, 'Duplicate name in import', maxErrors);
@@ -548,12 +584,13 @@ async function validateImportRows(type, list, executor, maxErrors = Infinity) {
 
 async function inspectImport(payload, executor = { query }, maxErrors = Infinity) {
   const { type, format = 'json', content, fileContent } = payload;
-  if (!['faculties', 'programs', 'programCourses', 'relationships'].includes(type)) {
+  if (!['faculties', 'programs', 'programCourses', 'relationships','prerequisiteGroups'].includes(type)) {
     return { validation: validationFailure('Unsupported import type'), referencesHash: '' };
   }
   if (!['json', 'csv', 'xlsx', 'pdf'].includes(format)) {
     return { validation: validationFailure('Unsupported import format'), referencesHash: '' };
   }
+  if (type === 'prerequisiteGroups' && format !== 'json') return { validation: validationFailure('Prerequisite group imports require JSON format'), referencesHash: '' };
   let parsed;
   try { parsed = await importRows({ type, format, content, fileContent }); }
   catch (error) {
@@ -627,7 +664,7 @@ export async function getImportStage(id, ownerId) {
 }
 
 export async function createImportStage(payload, user) {
-  if (!payload || !['faculties', 'programs', 'programCourses', 'relationships'].includes(payload.type)) {
+  if (!payload || !['faculties', 'programs', 'programCourses', 'relationships','prerequisiteGroups'].includes(payload.type)) {
     throw new AppError('Unsupported import type.', 400, 'UNSUPPORTED_IMPORT_TYPE');
   }
   if (!['json', 'csv', 'xlsx', 'pdf'].includes(payload.format || 'json')) {

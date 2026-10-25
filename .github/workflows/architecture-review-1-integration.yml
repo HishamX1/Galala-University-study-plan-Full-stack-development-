@@ -174,7 +174,9 @@ jobs:
           npm run check:dashboard-quick-access &&
           npm run test:dashboard-quick-access &&
           npm run check:admin-ui-contract &&
-          npm run test:admin-ui-contract
+          npm run test:admin-ui-contract &&
+          npm run check:academic-progress &&
+          npm run test:academic-progress
 
       - name: Run PostgreSQL-backed integration regressions
         run: >-
@@ -191,4 +193,5 @@ jobs:
           npm run test:password-reset-email &&
           npm run test:dashboard-db-performance &&
           npm run test:error-reports-db &&
-          npm run test:http-response-postgres
+          npm run test:http-response-postgres &&
+          npm run test:academic-progress-db

@@ -18,3 +18,17 @@ export async function createPrerequisiteRow(courseId, prerequisiteCourseId, exec
 export async function softDeletePrerequisiteRow(courseId, prerequisiteCourseId, executor, deletedBy = 'Admin') { return await executor.query("UPDATE course_prerequisites SET deleted_at=now(),deleted_by=$3,delete_reason='Admin delete',updated_at=now() WHERE course_id=$1 AND prerequisite_course_id=$2 AND deleted_at IS NULL RETURNING id,course_id,prerequisite_course_id,visible_to_students", [courseId, prerequisiteCourseId, deletedBy]); }
 export async function updatePrerequisiteVisibilityRow(courseId, prerequisiteCourseId, visible, executor) { return await executor.query('UPDATE course_prerequisites SET visible_to_students=$3,updated_at=now() WHERE course_id=$1 AND prerequisite_course_id=$2 AND deleted_at IS NULL RETURNING id,course_id,prerequisite_course_id,visible_to_students', [courseId, prerequisiteCourseId, visible]); }
 export async function softDeletePrerequisitesForCourses(ids, reason, executor, deletedBy = 'Admin') { await executor.query('UPDATE course_prerequisites SET deleted_at=now(),deleted_by=$3,delete_reason=$2,updated_at=now() WHERE (course_id=ANY($1::bigint[]) OR prerequisite_course_id=ANY($1::bigint[])) AND deleted_at IS NULL', [ids, reason, deletedBy]); }
+
+export async function listPrerequisiteGroupRows(courseIds, includeHidden, executor) {
+  if (!courseIds.length) return [];
+  return (await executor.query(`SELECT g.course_id,g.id AS group_id,g.group_type,g.label,g.position,
+      m.prerequisite_course_id,m.minimum_grade,m.position AS member_position,
+      cp.visible_to_students
+    FROM public.course_prerequisite_groups g
+    JOIN public.course_prerequisite_group_members m ON m.group_id=g.id
+    JOIN public.course_prerequisites cp ON cp.course_id=g.course_id AND cp.prerequisite_course_id=m.prerequisite_course_id AND cp.deleted_at IS NULL
+    WHERE g.course_id=ANY($1::bigint[])
+      AND ($2::boolean OR COALESCE(cp.visible_to_students,true))
+      AND (g.legacy_relation_id IS NULL OR EXISTS (SELECT 1 FROM public.course_prerequisites legacy WHERE legacy.id=g.legacy_relation_id AND legacy.deleted_at IS NULL))
+    ORDER BY g.course_id,g.position,g.id,m.position,m.id`, [courseIds,includeHidden])).rows;
+}

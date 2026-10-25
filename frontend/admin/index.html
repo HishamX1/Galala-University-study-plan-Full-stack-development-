@@ -239,7 +239,7 @@
         <div class="grid admin-grid">
           <div>
             <h3>Bulk Import</h3>
-            <label for="importType">Catalog data type</label><select id="importType"><option value="faculties">Faculties</option><option value="programs">Programs</option><option value="programCourses">Program courses</option><option value="relationships">Relationships</option></select>
+            <label for="importType">Catalog data type</label><select id="importType"><option value="faculties">Faculties</option><option value="programs">Programs</option><option value="programCourses">Program courses</option><option value="relationships">Relationships</option><option value="prerequisiteGroups">Prerequisite groups (JSON)</option></select>
             <label for="importFormat">File format</label><select id="importFormat"><option value="json">JSON</option><option value="csv">CSV</option><option value="xlsx">Excel (.xlsx)</option><option value="pdf">Structured PDF table</option></select>
             <label for="importFile">Select a file (Excel, CSV, or PDF)</label><input id="importFile" type="file" accept=".xlsx,.csv,.pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,application/pdf" />
             <label for="importContent">Paste JSON or CSV content</label><textarea id="importContent" rows="10" placeholder='[{"name":"Faculty of Engineering"}]'></textarea>
