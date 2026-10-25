@@ -112,10 +112,10 @@ try {
   const beforeTruncate = await readRevision();
   await withPostgresClient(async (client) => {
     await client.query('BEGIN');
-    await client.query('TRUNCATE public.course_prerequisites');
+    await client.query('TRUNCATE public.course_prerequisite_group_members, public.course_prerequisite_groups, public.course_prerequisites');
     const afterNonEmptyTruncate = await readRevision(client);
     assert.ok(BigInt(afterNonEmptyTruncate) > BigInt(beforeTruncate), 'truncating non-empty catalog relationships advances the revision');
-    await client.query('TRUNCATE public.course_prerequisites');
+    await client.query('TRUNCATE public.course_prerequisite_group_members, public.course_prerequisite_groups, public.course_prerequisites');
     assert.equal(await readRevision(client), afterNonEmptyTruncate, 'truncating an already-empty catalog table does not advance the revision');
     await client.query('ROLLBACK');
   });
