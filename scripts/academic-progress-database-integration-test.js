@@ -15,7 +15,7 @@ try {
     WHERE cp.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM public.course_prerequisite_group_members m
       JOIN public.course_prerequisite_groups g ON g.id=m.group_id WHERE g.course_id=cp.course_id AND m.prerequisite_course_id=cp.prerequisite_course_id)`);
   assert.equal(integrity.rows[0].missing,0,'preexisting prerequisite links must be backfilled');
-  await query(`INSERT INTO public.app_users(id,name,email,password_hash,role,status) VALUES($1,'Academic test',$2,'not-used','student','active'),($3,'Academic test 2',$4,'not-used','student','active')`,[first.id,`academic-${suffix}@example.test`,second.id,`academic2-${suffix}@example.test`]);
+  await query(`INSERT INTO public.app_users(id,name,email,username,password_hash,role,status) VALUES($1,'Academic test',$2,$3,'not-used','student','active'),($4,'Academic test 2',$5,$6,'not-used','student','active')`,[first.id,`academic-${suffix}@example.test`,`academic_${suffix.slice(0,10)}`,second.id,`academic2-${suffix}@example.test`,`academic2_${suffix.slice(0,10)}`]);
   const program=(await query('SELECT id FROM public.programs WHERE deleted_at IS NULL ORDER BY id LIMIT 1')).rows[0];
   const course=(await query('SELECT id,credits FROM public.program_courses WHERE program_id=$1 AND deleted_at IS NULL AND credits>0 ORDER BY id LIMIT 1',[program.id])).rows[0];
   assert.ok(program && course,'seeded program and positive-credit course are required');
