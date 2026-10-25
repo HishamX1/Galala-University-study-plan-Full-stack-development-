@@ -29,6 +29,17 @@ function findCourse(id) {
   return cache.programCourses.find((item) => Number(item.id) === Number(id));
 }
 
+function hasUncertainMutationOutcome(error) {
+  return error?.code === 'API_NETWORK_ERROR' || error?.code === 'REQUEST_TIMEOUT';
+}
+
+function reportActionError(error, message) {
+  if (typeof window !== 'undefined') {
+    window.__GU_LAST_API_ERROR__ = { ...error, message };
+  }
+  setMessage('error', message);
+}
+
 function endpointFor(kind) {
   const endpoints = {
     faculty: 'faculties',
@@ -183,7 +194,9 @@ async function refreshRelationManager(root, courseId) {
   await loadRelations();
   await loadAdminOps();
   const updated = findCourse(courseId);
-  if (updated) root.innerHTML = relationManagerMarkup(updated);
+  root.innerHTML = updated
+    ? relationManagerMarkup(updated)
+    : '<p class="empty-state">This course is no longer active. The latest catalog has been loaded.</p>';
 }
 
 async function openCourseView(course) {
@@ -231,6 +244,7 @@ async function openRelationManager(course) {
         const actionButton = addBtn || toggleBtn || removeBtn;
         await withButtonBusy(actionButton, async () => {
         setMessage('progress', addBtn ? 'Adding the relationship…' : toggleBtn ? 'Updating relationship visibility…' : 'Removing the relationship…');
+        let relationMutation = null;
         try {
           if (addBtn) {
             const baseCourseId = Number(root.querySelector('.relation-manager').dataset.courseId);
@@ -238,40 +252,78 @@ async function openRelationManager(course) {
             const type = root.querySelector('input[name="relationType"]:checked')?.value || 'prerequisite';
             const courseId = type === 'prerequisite' ? baseCourseId : selectedCourseId;
             const prerequisiteCourseId = type === 'prerequisite' ? selectedCourseId : baseCourseId;
+            relationMutation = { type: 'add', courseId, prerequisiteCourseId };
             await request(`/program-courses/${courseId}/prerequisites`, {
               method: 'POST',
               body: JSON.stringify({ prerequisiteCourseId, expectedVersion: expectedRelationVersion(findCourse(courseId)) })
             });
             setMessage('success', 'Relationship added.');
             await refreshRelationManager(root, baseCourseId);
+            relationMutation = null;
           }
 
           if (toggleBtn) {
             const courseId = Number(toggleBtn.dataset.dialogToggle);
             const prerequisiteId = Number(toggleBtn.dataset.prerequisiteId);
             const visibleToStudents = toggleBtn.dataset.visible === 'true';
+            relationMutation = { type: 'visibility', courseId, prerequisiteCourseId: prerequisiteId, visibleToStudents };
             await request(`/program-courses/${courseId}/prerequisites/${prerequisiteId}/visibility`, {
               method: 'PUT',
               body: JSON.stringify({ visibleToStudents, expectedVersion: expectedRelationVersion(findCourse(courseId)) })
             });
             setMessage('success', `Relation ${visibleToStudents ? 'shown to' : 'hidden from'} students.`);
             await refreshRelationManager(root, course.id);
+            relationMutation = null;
           }
 
           if (removeBtn) {
             const courseId = Number(removeBtn.dataset.dialogRemove);
             const prerequisiteId = Number(removeBtn.dataset.prerequisiteId);
+            relationMutation = { type: 'remove', courseId, prerequisiteCourseId: prerequisiteId };
             await request(`/program-courses/${courseId}/prerequisites/${prerequisiteId}`, {
               method: 'DELETE', body: JSON.stringify({ expectedVersion: expectedRelationVersion(findCourse(courseId)) })
             });
             setMessage('success', 'Relationship removed.');
             await refreshRelationManager(root, course.id);
+            relationMutation = null;
           }
         } catch (error) {
-          if (error.code === 'STALE_WRITE') await refreshRelationManager(root, course.id);
-          setMessage('error', error.code === 'STALE_WRITE'
-            ? 'This item changed while you were editing. The catalog has been refreshed; compare the latest values and reapply your change if appropriate.'
-            : error.message);
+          const shouldRefresh = error.code === 'STALE_WRITE' || error.status === 404 || hasUncertainMutationOutcome(error);
+          let refreshed = false;
+          if (shouldRefresh) {
+            try {
+              await refreshRelationManager(root, course.id);
+              refreshed = true;
+            } catch { /* Keep the original operation failure; never replay a mutation automatically. */ }
+          }
+
+          if (error.status === 404) {
+            reportActionError(error, refreshed
+              ? 'That relationship is no longer active. The latest catalog has been loaded; choose from the current relationships.'
+              : 'That relationship could not be found, and the catalog refresh also failed. Reconnect and refresh before trying again.');
+          } else if (hasUncertainMutationOutcome(error)) {
+            const currentCourse = relationMutation && findCourse(relationMutation.courseId);
+            const relation = currentCourse?.prerequisiteRelations?.find((item) => Number(item.prerequisiteCourseId) === Number(relationMutation.prerequisiteCourseId));
+            const confirmed = refreshed && relationMutation && (
+              (relationMutation.type === 'add' && relation)
+              || (relationMutation.type === 'remove' && !relation)
+              || (relationMutation.type === 'visibility' && relation && relation.visibleToStudents === relationMutation.visibleToStudents)
+            );
+            if (confirmed) {
+              const label = relationMutation.type === 'add' ? 'added'
+                : relationMutation.type === 'remove' ? 'removed'
+                  : relationMutation.visibleToStudents ? 'shown to students' : 'hidden from students';
+              setMessage('success', `The latest catalog confirms that the relationship was ${label}.`);
+              return;
+            }
+            reportActionError(error, refreshed
+              ? 'The connection was interrupted. The latest relationships were reloaded, but they do not confirm that action. Review the current state before trying again.'
+              : 'The connection was interrupted and the result could not be verified. Do not retry until the connection returns and the catalog refreshes.');
+          } else {
+            reportActionError(error, error.code === 'STALE_WRITE'
+              ? 'This item changed while you were editing. The catalog has been refreshed; compare the latest values and reapply your change if appropriate.'
+              : error.message);
+          }
         }
         });
       });
@@ -315,6 +367,7 @@ export function bindCrudDelegates() {
     const manageBtn = event.target.closest('[data-manage-relations]');
     if (!editBtn && !deleteBtn && !toggleBtn && !viewBtn && !manageBtn) return;
 
+    let deleteFlow = null;
     try {
       if (viewBtn) {
         const course = findCourse(viewBtn.dataset.viewCourse);
@@ -367,6 +420,7 @@ export function bindCrudDelegates() {
             ? cache.programs.find((item) => Number(item.id) === id)
             : cache.programCourses.find((item) => Number(item.id) === id);
         const fromCourseDetails = kind === 'course' && elements.dialog.fields.contains(deleteBtn);
+        deleteFlow = { id, kind, current, fromCourseDetails, submitted: false };
         const confirmed = await confirmDeletion(kind, id);
         if (!confirmed) {
           if (fromCourseDetails && current) await openCourseView(current);
@@ -374,9 +428,11 @@ export function bindCrudDelegates() {
         }
         await withButtonBusy(deleteBtn, async () => {
           setMessage('progress', `Deleting the ${kind}…`);
+          deleteFlow.submitted = true;
           await request(`/${endpointFor(kind)}/${id}`, {
             method: 'DELETE', body: JSON.stringify({ expectedVersion: current?.version })
           });
+          deleteFlow.completed = true;
         });
         if (fromCourseDetails) elements.dialog.backdrop.hidden = true;
         setMessage('success', `${kind[0].toUpperCase()}${kind.slice(1)} moved to the recycle bin successfully.`);
@@ -384,11 +440,49 @@ export function bindCrudDelegates() {
 
       await loadRelations();
       await loadAdminOps();
+      deleteFlow = null;
     } catch (error) {
-      if (error.code === 'STALE_WRITE') await loadRelations();
-      setMessage('error', error.code === 'STALE_WRITE'
-        ? 'This item changed while you were editing. The catalog has been refreshed; compare the latest values and reopen the edit to reapply your change.'
-        : error.message);
+      const shouldRefresh = error.code === 'STALE_WRITE'
+        || (deleteFlow && (error.status === 404 || hasUncertainMutationOutcome(error)));
+      let refreshed = false;
+      if (shouldRefresh) {
+        try {
+          await loadRelations();
+          await loadAdminOps();
+          refreshed = true;
+        } catch { /* Preserve the original failure when the API is still unavailable. */ }
+      }
+
+      if (deleteFlow?.kind === 'course' && !deleteFlow.submitted && hasUncertainMutationOutcome(error)) {
+        reportActionError(error, refreshed
+          ? 'The deletion preview could not reach the API, so no deletion was submitted. The catalog was refreshed; check the connection before opening the preview again.'
+          : 'The deletion preview could not reach the API, and the result could not be checked. No deletion was submitted. Reconnect and refresh before trying again.');
+      } else if (deleteFlow?.completed && hasUncertainMutationOutcome(error)) {
+        reportActionError(error, refreshed
+          ? 'The server confirmed the deletion, and the catalog has now been refreshed.'
+          : 'The server confirmed the deletion, but the follow-up catalog refresh could not reach the API. The deletion is complete; refresh the page when the connection returns.');
+      } else if (deleteFlow?.kind === 'course' && deleteFlow.submitted && hasUncertainMutationOutcome(error)) {
+        const courseStillActive = cache.programCourses.some((item) => Number(item.id) === deleteFlow.id);
+        if (refreshed && !courseStillActive) {
+          if (deleteFlow.fromCourseDetails) elements.dialog.backdrop.hidden = true;
+          setMessage('success', 'The latest catalog confirms the course is no longer active and has been moved out of the active catalog.');
+        } else {
+          reportActionError(error, refreshed
+            ? 'The connection was interrupted. The latest catalog still shows this course as active; wait, refresh again, and verify its state before retrying. No automatic retry was made.'
+            : 'The connection was interrupted and the result could not be verified. Do not retry until the connection returns and the catalog refreshes.');
+        }
+      } else if (deleteFlow && error.status === 404) {
+        if (deleteFlow.fromCourseDetails && refreshed && !cache.programCourses.some((item) => Number(item.id) === deleteFlow.id)) {
+          elements.dialog.backdrop.hidden = true;
+        }
+        reportActionError(error, refreshed
+          ? 'This catalog item is no longer active. The latest catalog has been loaded; review it before continuing.'
+          : 'This catalog item could not be found, and the catalog refresh failed. Reconnect and refresh before trying again.');
+      } else {
+        reportActionError(error, error.code === 'STALE_WRITE'
+          ? 'This item changed while you were editing. The catalog has been refreshed; compare the latest values and reopen the edit to reapply your change.'
+          : error.message);
+      }
     }
   });
 }
