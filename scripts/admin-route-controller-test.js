@@ -10,11 +10,13 @@ function response() {
   return {
     statusCode: 200,
     writeHeadCalls: 0,
+    headersSent: false,
+    writableEnded: false,
     headers: {},
     body: '',
-    writeHead(status, headers = {}) { this.writeHeadCalls += 1; this.statusCode = status; Object.assign(this.headers, headers); },
+    writeHead(status, headers = {}) { this.writeHeadCalls += 1; this.headersSent = true; this.statusCode = status; Object.assign(this.headers, headers); },
     setHeader(name, value) { this.headers[name] = value; },
-    end(body = '') { this.body += body; }
+    end(body = '') { this.body += body; this.writableEnded = true; }
   };
 }
 
@@ -117,6 +119,40 @@ await handleAdminOperationsRequest(
 assert.equal(missingBackup.statusCode, 404);
 assert.deepEqual(JSON.parse(missingBackup.body), { error: 'Backup not found' });
 
+const restoredItem = response();
+assert.equal(await handleAdminOperationsRequest(
+  request('POST', `${env.apiBasePath}/admin/recycle-bin/faculties/7/restore`), restoredItem,
+  new URL(`${env.apiBasePath}/admin/recycle-bin/faculties/7/restore`, 'http://localhost'), admin,
+  { restoreRecycleItem: async () => true }
+), true);
+assert.equal(restoredItem.statusCode, 200);
+assert.equal(restoredItem.writeHeadCalls, 1);
+
+const backups = response();
+assert.equal(await handleAdminOperationsRequest(
+  request('GET', `${env.apiBasePath}/admin/backups`), backups,
+  new URL(`${env.apiBasePath}/admin/backups`, 'http://localhost'), admin,
+  { getBackups: async () => [{ id: 4, format: 'json' }] }
+), true);
+assert.deepEqual(JSON.parse(backups.body), [{ id: 4, format: 'json' }]);
+
+const backupDownload = response();
+assert.equal(await handleAdminOperationsRequest(
+  request('GET', `${env.apiBasePath}/admin/backups/4/download`), backupDownload,
+  new URL(`${env.apiBasePath}/admin/backups/4/download`, 'http://localhost'), admin,
+  { getBackupDownload: async () => ({ mimeType: 'application/json', filename: 'backup.json', content: '{"ok":true}' }) }
+), true);
+assert.equal(backupDownload.writeHeadCalls, 1);
+assert.equal(backupDownload.body, '{"ok":true}');
+
+const systemHealth = response();
+assert.equal(await handleAdminOperationsRequest(
+  request('GET', `${env.apiBasePath}/admin/system-health`), systemHealth,
+  new URL(`${env.apiBasePath}/admin/system-health`, 'http://localhost'), admin,
+  { getSystemHealth: async () => ({ database: 'connected' }) }
+), true);
+assert.deepEqual(JSON.parse(systemHealth.body), { database: 'connected' });
+
 let currentUserCalls = 0;
 const resolveCurrentUser = async () => { currentUserCalls += 1; return { id: 'student-1', role: 'student' }; };
 const unauthenticated = response();
@@ -209,8 +245,9 @@ for (const role of ['student', 'regular_admin']) {
     new URL(`${env.apiBasePath}/admin/error-reports`, 'http://localhost'), {
       resolveCurrentUser: async () => ({ id: 'user-1', role })
     });
-  assert.equal(handled, undefined, `${role} cannot reach the private report inbox`);
+  assert.equal(handled, undefined, `${role} denial stops protected route dispatch`);
   assert.equal(deniedReportInbox.statusCode, 403);
+  assert.equal(deniedReportInbox.writeHeadCalls, 1, `${role} denial writes only one response`);
 }
 
 const originDenied = response();

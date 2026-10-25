@@ -40,10 +40,10 @@ jobs:
 
     steps:
       - name: Check out review branch
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v4
         with:
           node-version: 24
           package-manager-cache: false
@@ -51,17 +51,34 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Verify disposable PostgreSQL target
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_ACTIONS:-}" == "true" ]]
+          [[ "${TEST_DATABASE_URL:-}" == "postgresql://postgres:postgres@127.0.0.1:5432/gu_pt_phase1_test" ]]
+          [[ "${DATABASE_URL:-}" == "$TEST_DATABASE_URL" ]]
+          [[ "${ALLOW_DESTRUCTIVE_TEST_DB:-}" == "I_CONFIRM_DISPOSABLE_LOCAL_DATABASE" ]]
+          [[ "$(psql "$TEST_DATABASE_URL" -Atqc 'SELECT current_database()')" == "gu_pt_phase1_test" ]]
+
       - name: Apply canonical migrations
         shell: bash
         run: |
           set -euo pipefail
           while IFS= read -r migration; do
             echo "Applying ${migration}"
-            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
+            psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
           done < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -print | sort)
 
       - name: Seed canonical catalog fixtures
-        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/seed.sql
+        run: psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/seed.sql
+
+      - name: Verify migration and seed completed
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(psql "$TEST_DATABASE_URL" -Atqc 'SELECT current_database()')" == "gu_pt_phase1_test" ]]
+          [[ "$(psql "$TEST_DATABASE_URL" -Atqc "SELECT to_regclass('public.admin_audit_logs') IS NOT NULL AND to_regclass('public.catalog_import_stages') IS NOT NULL")" == "t" ]]
 
       - name: Rehearse disposable PostgreSQL dump and restore
         shell: bash
@@ -119,6 +136,7 @@ jobs:
       - name: Run static and database-free regressions
         run: >-
           npm run check &&
+          npm run test:http-response-boundary &&
           npm run check:password-reset-email &&
           npm run test:password-reset-email-provider &&
           npm run test:password-recovery-navigation &&
@@ -172,4 +190,5 @@ jobs:
           npm run test:notification-read &&
           npm run test:password-reset-email &&
           npm run test:dashboard-db-performance &&
-          npm run test:error-reports-db
+          npm run test:error-reports-db &&
+          npm run test:http-response-postgres

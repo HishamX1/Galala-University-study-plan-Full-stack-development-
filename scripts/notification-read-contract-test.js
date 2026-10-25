@@ -7,7 +7,7 @@ import { markNotificationRead } from '../backend/src/services/authService.js';
 import { env } from '../backend/src/config/env.js';
 
 function response() {
-  return { statusCode: 200, headers: {}, body: '', writeHead(status, headers = {}) { this.statusCode = status; Object.assign(this.headers, headers); }, setHeader(name, value) { this.headers[name] = value; }, end(body = '') { this.body += body; } };
+  return { statusCode: 200, headersSent: false, writableEnded: false, writeHeadCalls: 0, headers: {}, body: '', writeHead(status, headers = {}) { this.writeHeadCalls += 1; this.headersSent = true; this.statusCode = status; Object.assign(this.headers, headers); }, setHeader(name, value) { this.headers[name] = value; }, end(body = '') { this.body += body; this.writableEnded = true; } };
 }
 function request(method, pathname, body = '') {
   const req = Readable.from(body ? [Buffer.from(body)] : []);
@@ -19,7 +19,8 @@ async function invoke(path, body, user, services = {}) {
   const res = response();
   const url = new URL(req.url, 'http://localhost');
   const handled = await handleDashboardRequest(req, res, url, user, services);
-  assert.equal(handled, undefined);
+  assert.equal(handled, true, 'a completed controller response is reported as handled');
+  assert.equal(res.writeHeadCalls, 1, 'controller response is written once');
   return res;
 }
 
