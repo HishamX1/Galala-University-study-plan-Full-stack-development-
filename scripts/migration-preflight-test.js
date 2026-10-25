@@ -34,7 +34,7 @@ assert.match(studentProgressMigration,/REFERENCES public\.app_users\(id\) ON DEL
 assert.match(studentProgressMigration,/verified boolean NOT NULL DEFAULT false CHECK \(verified = false\)/);
 assert.match(studentProgressMigration,/grade text NOT NULL CHECK/);
 const seed=fs.readFileSync(new URL('../supabase/seed.sql',import.meta.url),'utf8');
-assert.match(seed,/INSERT INTO course_prerequisite_groups[\\s\\S]*legacy_relation_id[\\s\\S]*INSERT INTO course_prerequisite_group_members/,
+assert.match(seed,/INSERT INTO course_prerequisite_groups[\s\S]*legacy_relation_id[\s\S]*INSERT INTO course_prerequisite_group_members/,
   'canonical seeded prerequisite links retain one mandatory group per legacy relationship');
 const supportIndexMigration = fs.readFileSync(new URL('../supabase/migrations/20261022160000_support_list_order_indexes.sql', import.meta.url), 'utf8');
 assert.match(supportIndexMigration, /idx_student_complaints_created_id/);
