@@ -116,7 +116,7 @@ try {
   await assert.rejects(() => createProgramCourse({
     programId: program.id, name: failedCourseName, code: failedCourseCode, yearNo: 1, semesterNo: 3,
     credits: 1, isRequired: false, description: null, prerequisiteCourseIds: [Number.MAX_SAFE_INTEGER]
-  }), (error) => error.code === '23503');
+  }), (error) => error.message === 'FK_PROGRAM_COURSE');
   assert.equal(await count('SELECT count(*)::int AS count FROM courses WHERE name = $1', [failedCourseName]), 0,
     'failed multi-write course creation must roll back the shared course insert');
   assert.equal(await count('SELECT count(*)::int AS count FROM program_courses WHERE code = $1', [failedCourseCode]), 0,
@@ -199,7 +199,7 @@ try {
     (error) => error.code === 'STALE_WRITE', 'a stale course delete must roll back its relation soft-deletes');
   assert.deepEqual(new Set(await getPrerequisites(second.id)), new Set([first.id, third.id]));
 
-  await assert.rejects(() => updatePrerequisites(second.id, [Number.MAX_SAFE_INTEGER]), (error) => error.code === '23503');
+  await assert.rejects(() => updatePrerequisites(second.id, [Number.MAX_SAFE_INTEGER]), (error) => error.message === 'FK_PROGRAM_COURSE');
   assert.deepEqual(new Set(await getPrerequisites(second.id)), new Set([first.id, third.id]),
     'failed prerequisite replacement must restore the links deleted earlier in the same transaction');
 
