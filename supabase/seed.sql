@@ -699,5 +699,24 @@ values
   ((select id from program_courses where code = 'CMS502'),
    (select id from program_courses where code = 'CMS323'));
 
+-- Seed each legacy prerequisite edge as its own mandatory group so seeded rules
+-- retain the same AND semantics after the grouped-prerequisite migration.
+WITH seeded_groups AS (
+  INSERT INTO course_prerequisite_groups (course_id, legacy_relation_id, group_type, label, position)
+  SELECT cp.course_id, cp.id, 'mandatory', 'Required prerequisite',
+         row_number() OVER (PARTITION BY cp.course_id ORDER BY cp.prerequisite_course_id) - 1
+    FROM course_prerequisites cp
+   WHERE NOT EXISTS (
+     SELECT 1 FROM course_prerequisite_groups existing
+      WHERE existing.legacy_relation_id = cp.id
+   )
+  RETURNING id, legacy_relation_id
+)
+INSERT INTO course_prerequisite_group_members (group_id, prerequisite_course_id, position)
+SELECT seeded_groups.id, cp.prerequisite_course_id, 0
+  FROM seeded_groups
+  JOIN course_prerequisites cp ON cp.id = seeded_groups.legacy_relation_id
+ON CONFLICT (group_id, prerequisite_course_id) DO NOTHING;
+
 -- Missing prerequisite in source data:
 -- LIB116 is referenced by BPT514 but is not present in data.js

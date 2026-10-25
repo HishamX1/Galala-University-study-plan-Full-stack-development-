@@ -12,6 +12,7 @@ import { handleDashboardRequest } from '../controllers/dashboardController.js';
 import { handleAdminSupportRequest, handleAdminUserRequest } from '../controllers/adminUserController.js';
 import { handleAdminOperationsRequest } from '../controllers/adminOperationsController.js';
 import { handleErrorReportRequest } from '../controllers/errorReportController.js';
+import { handleStudentProgressRequest } from '../controllers/studentProgressController.js';
 
 function isAllowedCorsOrigin(origin) {
   return Boolean(origin) && env.corsOrigins.includes(origin);
@@ -93,6 +94,10 @@ export async function handleApi(req, res, url, { resolveCurrentUser = currentUse
 
     const user = await resolveCurrentUser(req);
     if (!user) return unauthorized(res);
+    if (url.pathname === `${env.apiBasePath}/student/academic-progress`) {
+      if (user.role !== 'student' || !requirePermission(res, user, Permissions.academicProgress)) return;
+      return handleStudentProgressRequest(req, res, url, user);
+    }
     const errorReportsPath = `${env.apiBasePath}/admin/error-reports`;
     if (url.pathname === errorReportsPath || url.pathname.startsWith(`${errorReportsPath}/`)) {
       const permission = req.method === 'POST' && url.pathname === errorReportsPath

@@ -107,9 +107,12 @@ async function confirmDeletion(kind, id) {
 }
 
 async function coursePatch(course) {
+  const groups = course.prerequisiteGroups || [];
+  const mandatoryCodes = (Array.isArray(course.prerequisiteGroups) ? groups.filter(group => group.type === 'mandatory').flatMap(group => group.members || []).map(member => cache.programCourses.find(item => Number(item.id) === Number(member.courseId))?.code).filter(Boolean) : prerequisiteCodes(course).split(',').map(code=>code.trim()).filter(Boolean));
+  const alternativeText = groups.filter(group => group.type === 'alternative').map(group => `${group.label}: ${(group.members || []).map(member => cache.programCourses.find(item => Number(item.id) === Number(member.courseId))?.code).filter(Boolean).join(', ')}`).join('\n');
   const result = await openFormDialog({
     title: `Edit ${course.code}`,
-    description: 'Update course details and comma-separated prerequisite course codes.',
+    description: 'Existing relationships remain mandatory. Add alternative groups as “Label: CODE, CODE”, one group per line.',
     fields: [
       { name: 'programId', label: 'Program', type: 'select', value: course.programId, options: selectOptions(cache.programs), required: true },
       { name: 'yearNo', label: 'Year Number', value: course.yearNo, type: 'number', min: 1, required: true },
@@ -118,8 +121,19 @@ async function coursePatch(course) {
       { name: 'name', label: 'Course Name', value: course.name, required: true },
       { name: 'credits', label: 'Credits', value: course.credits, type: 'number', min: 0, required: true },
       { name: 'description', label: 'Description', value: course.description || '', type: 'textarea' },
-      { name: 'prerequisites', label: 'Prerequisites', value: prerequisiteCodes(course) }
-    ]
+      { name: 'prerequisites', label: 'Mandatory prerequisites', type: 'textarea', value: mandatoryCodes.join(', ') },
+      { name: 'alternativePrerequisiteGroups', label: 'Alternative prerequisite groups', type: 'textarea', value: alternativeText }
+    ],
+    onOpen: (root) => {
+      const preview=document.createElement('p'); preview.className='prerequisite-rule-preview'; preview.setAttribute('aria-live','polite');
+      const mandatory=root.querySelector('[name="prerequisites"]'); const alternatives=root.querySelector('[name="alternativePrerequisiteGroups"]');
+      const update=()=>{
+        const required=String(mandatory?.value||'').split(',').map(item=>item.trim()).filter(Boolean);
+        const groups=String(alternatives?.value||'').split(/\r?\n/).map(line=>line.trim()).filter(Boolean).map(line=>{const index=line.indexOf(':');return index>0?`${line.slice(0,index).trim()} (${line.slice(index+1).split(',').map(item=>item.trim()).filter(Boolean).join(' OR ')})`:line});
+        preview.textContent=`Rule preview — Required ALL: ${required.join(' AND ')||'none'}${groups.length?`; Alternative groups, ANY ONE per group: ${groups.join('; ')}`:''}`;
+      };
+      mandatory?.addEventListener('input',update); alternatives?.addEventListener('input',update); root.append(preview); update();
+    }
   });
   if (!result) return null;
   return {
@@ -131,6 +145,17 @@ async function coursePatch(course) {
     credits: Number(result.credits),
     description: result.description.trim() || null,
     prerequisiteCourseIds: mapCodesToIds(parsePrerequisiteCodes(result.prerequisites)),
+    prerequisiteGroups: {
+      mandatoryCourseIds: mapCodesToIds(parsePrerequisiteCodes(result.prerequisites)),
+      alternativeGroups: String(result.alternativePrerequisiteGroups || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean).map(line => {
+        const separator = line.indexOf(':');
+        if (separator < 1) throw new Error('Alternative groups must use “Label: CODE, CODE”.');
+        const label = line.slice(0, separator).trim();
+        const codes = parsePrerequisiteCodes(line.slice(separator + 1));
+        if (!label || codes.length < 2) throw new Error('Each alternative group needs a label and at least two course codes.');
+        return { label, prerequisiteCourseIds: mapCodesToIds(codes) };
+      })
+    },
     expectedVersion: course.version
   };
 }
@@ -406,7 +431,9 @@ export function bindCrudDelegates() {
         if (!patch) return;
         await withButtonBusy(editBtn, async () => {
           setMessage('progress', `Updating the ${kind}…`);
-          await request(`/${endpointFor(kind)}/${id}`, { method: 'PUT', body: JSON.stringify(patch) });
+          const { prerequisiteGroups, ...entityPatch } = patch;
+          const updatePayload = kind === 'course' && prerequisiteGroups ? { ...entityPatch, prerequisiteGroups } : entityPatch;
+          await request(`/${endpointFor(kind)}/${id}`, { method: 'PUT', body: JSON.stringify(updatePayload) });
         });
         setMessage('success', `${kind[0].toUpperCase()}${kind.slice(1)} updated successfully.`);
       }

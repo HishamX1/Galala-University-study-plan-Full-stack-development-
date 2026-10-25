@@ -2,7 +2,7 @@
 
 ## Scope
 
-This document is design only. The current catalog must not be used to fabricate enrollment, grades, credits, GPA, completed courses, or degree progress.
+The catalog is not an official record of enrollment, grades, completed courses, or degree progress. A separate, explicitly unverified student-entered planning prototype is documented in [student academic progress](student-academic-progress.md). It must not be presented as a SIS feed or official degree audit.
 
 ## Canonical future model
 

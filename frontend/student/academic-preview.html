@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Academic Progress Local Preview</title>
+  <style>
+    :root{font-family:system-ui,sans-serif;color:#182337;background:#f3f6fa;--navy:#002147;--gold:#d4af37;--muted:#637083}
+    *{box-sizing:border-box}body{margin:0}.bar{background:var(--navy);color:white;padding:16px max(18px,calc((100vw - 1100px)/2));border-bottom:3px solid var(--gold)}main{max-width:1100px;margin:auto;padding:22px 16px}.banner,.panel{background:white;border:1px solid #dce3ec;border-radius:14px;padding:18px;margin-bottom:16px}.banner{border-left:5px solid var(--gold)}h1,h2,h3,p{margin-top:0}h1{font-size:1.35rem}.muted{color:var(--muted)}.scenarios{display:flex;gap:8px;flex-wrap:wrap}.scenarios button,.course{font:inherit;border:1px solid #d3dce7;border-radius:9px;background:white;color:var(--navy);padding:10px 12px}.scenarios button{cursor:pointer}.scenarios button[aria-pressed=true]{background:var(--navy);color:white}.strip{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:2px 2px 12px}.course{flex:0 0 calc((100% - 24px)/3);min-width:0;text-align:left;scroll-snap-align:start;border-top:4px solid #8994a4}.course strong,.course span{display:block}.course span{margin-top:7px;color:var(--muted);font-size:.88rem}.course.passed{border-top-color:#16834a}.course.failed{border-top-color:#c62828}.selected{background:#fffaf0;border-top-color:var(--gold)}.rule{border:1px solid #e0e6ee;background:#f8fafc;border-radius:9px;padding:12px;margin:8px 0}.status{font-weight:700}.notice{color:#754f00;background:#fff6db;padding:10px;border-radius:8px}@media(max-width:700px){.course{flex-basis:min(82vw,260px)}}
+  </style>
+</head>
+<body>
+  <header class="bar">Galala University Study Plan Center · Local Preview</header>
+  <main id="preview" hidden>
+    <section class="banner"><h1>Academic progress prototype</h1><p><strong>Local demo fixture.</strong> This page is not connected to the catalog API, database, or authenticated student records. Its course names and rule examples are synthetic and do not represent GU curriculum requirements.</p><p class="muted">Open locally with <code>?academicDemo=1</code>. Changes only switch between in-memory examples and are discarded when the page closes.</p></section>
+    <section class="panel"><h2>Preview scenarios</h2><div class="scenarios" id="scenarios"></div></section>
+    <section class="panel"><h2 id="profile-title"></h2><p class="muted" id="profile-message"></p><h3>Prerequisites · <span id="prereq-count"></span></h3><div class="strip" id="prerequisites"></div><h3>Selected course</h3><div class="strip" id="selected-course"></div><h3>Required For · <span id="dependents-count"></span></h3><div class="strip" id="dependents"></div><div id="decision"></div></section>
+    <section class="panel"><h2>GPA and CGPA</h2><p id="gpa-message" class="notice"></p><p>GPA and CGPA are not shown because this isolated fixture has no real course credits and the university repeat-grade policy remains unconfirmed.</p></section>
+  </main>
+  <main id="blocked" hidden><section class="banner"><h1>Local preview only</h1><p>Use a local file URL and add <code>?academicDemo=1</code>. The fixture cannot be loaded from a hosted site.</p></section></main>
+  <script>
+    (()=>{
+      const local=location.protocol==='file:'||['localhost','127.0.0.1','::1'].includes(location.hostname);
+      const enabled=new URLSearchParams(location.search).get('academicDemo')==='1';
+      if(!local||!enabled){document.getElementById('blocked').hidden=false;return}
+      const cases=[
+        {id:'empty',title:'New student · empty profile',message:'No attempts recorded. Courses remain not completed.',pre:[],course:{code:'DEMO-201',name:'Synthetic Target Course'},deps:[],eligible:false},
+        {id:'passed',title:'Student · passed prerequisites',message:'One entered non-F attempt is shown as completed for this prototype. No official transcript is queried.',pre:[['DEMO-101','Synthetic Foundation','passed','Completed · B+'],['DEMO-102','Synthetic Methods','passed','Completed · A']],course:{code:'DEMO-201',name:'Synthetic Target Course'},deps:[],eligible:true},
+        {id:'failed',title:'Student · failed course and retake needed',message:'An F remains in the attempt history and does not satisfy the prerequisite.',pre:[['DEMO-101','Synthetic Foundation','failed','Failed · F · Retake required']],course:{code:'DEMO-201',name:'Synthetic Target Course'},deps:[],eligible:false},
+        {id:'or_pass',title:'Student · qualifies through an OR route',message:'Synthetic group: complete either Demo Route A or Demo Route B. One passed route is enough.',pre:[['DEMO-111','Synthetic Route A','passed','Completed · B'],['DEMO-112','Synthetic Route B','neutral','Not completed']],course:{code:'DEMO-201',name:'Synthetic Target Course'},deps:[],eligible:true,or:true},
+        {id:'or_none',title:'Student · neither OR option passed',message:'Synthetic group: complete either Demo Route A or Demo Route B. Neither option is recorded as passed.',pre:[['DEMO-111','Synthetic Route A','failed','Failed · F · Retake required'],['DEMO-112','Synthetic Route B','neutral','Not completed']],course:{code:'DEMO-201',name:'Synthetic Target Course'},deps:[],eligible:false,or:true},
+        {id:'strip',title:'Hierarchy · more than three cards',message:'Swipe or scroll the strip. On desktop the visible strip is limited to three cards.',pre:Array.from({length:7},(_,i)=>[`DEMO-${String(120+i)}`,`Synthetic Course ${i+1}`,'neutral','Not completed']),course:{code:'DEMO-201',name:'Synthetic Target Course'},deps:[['DEMO-301','Synthetic Dependent 1'],['DEMO-302','Synthetic Dependent 2'],['DEMO-303','Synthetic Dependent 3'],['DEMO-304','Synthetic Dependent 4']],eligible:false}
+      ];
+      const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+      const card=item=>`<article class="course ${item[2]||''}"><strong>${escape(item[0])}</strong><span>${escape(item[1])}</span>${item[3]?`<span class="status">${escape(item[3])}</span>`:''}</article>`;
+      let selected=cases[0];
+      const render=()=>{
+        document.getElementById('profile-title').textContent=selected.title;
+        document.getElementById('profile-message').textContent=selected.message;
+        document.getElementById('prereq-count').textContent=selected.pre.length;
+        document.getElementById('dependents-count').textContent=selected.deps.length;
+        document.getElementById('prerequisites').innerHTML=selected.pre.map(card).join('')||'<span class="muted">No prerequisites recorded.</span>';
+        document.getElementById('selected-course').innerHTML=card([selected.course.code,selected.course.name,'selected','Selected course']);
+        document.getElementById('dependents').innerHTML=selected.deps.map(item=>card([...item,'neutral','Eligibility is not inferred from this relation'])).join('')||'<span class="muted">No dependent courses recorded.</span>';
+        document.getElementById('decision').innerHTML=selected.eligible?'<p class="rule status">Eligible through the configured prerequisite group (synthetic fixture).</p>':'<p class="rule status">Not yet eligible — a requirement remains (synthetic fixture).</p>';
+        document.getElementById('scenarios').innerHTML=cases.map((item,index)=>`<button type="button" aria-pressed="${item.id===selected.id}" data-case="${index}">${escape(item.title)}</button>`).join('');
+      };
+      document.getElementById('preview').hidden=false;
+      document.getElementById('scenarios').addEventListener('click',event=>{const button=event.target.closest('[data-case]');if(button){selected=cases[Number(button.dataset.case)];render()}});
+      render();
+    })();
+  </script>
+</body>
+</html>
