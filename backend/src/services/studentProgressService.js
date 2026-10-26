@@ -11,6 +11,14 @@ function validatePayload(body) {
   if (!body || !Number.isInteger(body.programId) || body.programId <= 0 || !Array.isArray(body.attempts) || body.attempts.length > 500) {
     throw new ValidationError('Invalid academic progress payload.');
   }
+  if (Object.hasOwn(body,'totalProgramCredits') && body.totalProgramCredits !== null
+    && (!Number.isInteger(body.totalProgramCredits) || body.totalProgramCredits < 1 || body.totalProgramCredits > 1000)) {
+    throw new ValidationError('Total program credits must be between 1 and 1000.');
+  }
+  if (Object.hasOwn(body,'targetGpa') && body.targetGpa !== null
+    && (!Number.isFinite(body.targetGpa) || body.targetGpa < 0 || body.targetGpa > 4 || Math.abs(Math.round(body.targetGpa * 100) - body.targetGpa * 100) > 1e-8)) {
+    throw new ValidationError('Target GPA must be between 0.00 and 4.00.');
+  }
   const seen = new Set();
   for (const attempt of body.attempts) {
     if (!attempt || (attempt.id !== undefined && !/^[0-9a-f-]{36}$/i.test(attempt.id))
@@ -30,7 +38,11 @@ export async function readOwnAcademicProgress(user, requestedProgramId = null) {
   const stored = await getStudentProgress({ query }, user.id);
   const requested = requestedProgramId == null ? null : Number(requestedProgramId);
   const programId = requested || Number(stored.profile?.program_id) || 0;
-  const selectedProgram = requested ? (await query('SELECT id,name FROM public.programs WHERE id=$1 AND deleted_at IS NULL', [requested])).rows[0] : stored.profile;
+  const selectedProgram = requested ? (await query(`SELECT p.id,p.name,p.faculty_id,f.name AS faculty_name,
+      sap.total_program_credits,sap.target_gpa
+    FROM public.programs p JOIN public.faculties f ON f.id=p.faculty_id
+    LEFT JOIN public.student_academic_profiles sap ON sap.program_id=p.id AND sap.user_id=$2
+    WHERE p.id=$1 AND p.deleted_at IS NULL AND f.deleted_at IS NULL`, [requested,user.id])).rows[0] : stored.profile;
   if (requested && !selectedProgram) throw new ValidationError('Select an active program.');
   const courses = programId ? (await listProgramCourseCredits({ query }, programId)).rows : [];
   const attempts = stored.attempts.map((item) => ({
@@ -59,8 +71,20 @@ export async function readOwnAcademicProgress(user, requestedProgramId = null) {
   }));
   return {
     selfReported: true,
-    profile: selectedProgram ? { programId, programName: selectedProgram.program_name || selectedProgram.name, verified: false } : null,
-    programs: (await query('SELECT id,name FROM public.programs WHERE deleted_at IS NULL ORDER BY name')).rows.map((row) => ({ id: Number(row.id), name: row.name })),
+    profile: selectedProgram ? {
+      programId,
+      programName: selectedProgram.program_name || selectedProgram.name,
+      facultyId: Number(selectedProgram.faculty_id),
+      facultyName: selectedProgram.faculty_name,
+      totalProgramCredits: Number(selectedProgram.total_program_credits) || null,
+      targetGpa: selectedProgram.target_gpa == null ? null : Number(selectedProgram.target_gpa),
+      verified: false
+    } : null,
+    programs: (await query(`SELECT p.id,p.name,p.faculty_id,f.name AS faculty_name
+      FROM public.programs p JOIN public.faculties f ON f.id=p.faculty_id
+      WHERE p.deleted_at IS NULL AND f.deleted_at IS NULL ORDER BY f.name,p.name`)).rows.map((row) => ({
+      id: Number(row.id), name: row.name, facultyId: Number(row.faculty_id), facultyName: row.faculty_name
+    })),
     courses,
     attempts,
     eligibility,
@@ -69,7 +93,7 @@ export async function readOwnAcademicProgress(user, requestedProgramId = null) {
       const [academicYear, term] = key.split(':');
       return { academicYear: Number(academicYear), term, ...result };
     }),
-    cgpa: { available: false, reason: 'CGPA is hidden until the university confirms how repeated courses and failed attempts count.' },
+    cgpa: { available: false, reason: 'CGPA remains hidden until the university verifies the program credit total and confirms how repeated courses and failed attempts count.' },
     gradeScale: 'Student-entered grades use the configured GU planning scale; the record is not verified against university records.'
   };
 }
@@ -87,7 +111,7 @@ export async function saveOwnAcademicProgress(user, body) {
         const valid = await client.query('SELECT id FROM public.program_courses WHERE program_id=$1 AND id=ANY($2::bigint[]) AND deleted_at IS NULL', [body.programId, ids]);
         if (valid.rowCount !== ids.length) throw new ValidationError('Every attempted course must belong to the selected active program.');
       }
-      await upsertStudentAcademicProfile(client, user.id, body.programId);
+      await upsertStudentAcademicProfile(client, user.id, body.programId, body);
       await saveStudentAttempts(client, user.id, body.programId, body.attempts);
       await client.query('COMMIT');
       return readOwnAcademicProgress(user);

@@ -18,9 +18,9 @@ assert.deepEqual(compareMigrationVersions(['20260420120000'], ['20260420120000',
   unexpected: ['20260901000000']
 });
 const repositoryMigrations = loadRequiredMigrations();
-assert.equal(repositoryMigrations.length, 18, 'the complete canonical migration chain should be discovered');
-assert.equal(repositoryMigrations.at(-1).version, '20261026110000');
-assert.equal(repositoryMigrations.at(-1).filename, '20261026110000_student_self_reported_progress.sql');
+assert.equal(repositoryMigrations.length, 19, 'the complete canonical migration chain should be discovered');
+assert.equal(repositoryMigrations.at(-1).version, '20261026120000');
+assert.equal(repositoryMigrations.at(-1).filename, '20261026120000_student_profile_goals.sql');
 const errorReportMigration = fs.readFileSync(new URL('../supabase/migrations/20261024120000_admin_error_reports.sql', import.meta.url), 'utf8');
 assert.match(errorReportMigration, /ENABLE ROW LEVEL SECURITY/);
 assert.match(errorReportMigration, /FORCE ROW LEVEL SECURITY/);
@@ -33,6 +33,9 @@ const studentProgressMigration=fs.readFileSync(new URL('../supabase/migrations/2
 assert.match(studentProgressMigration,/REFERENCES public\.app_users\(id\) ON DELETE CASCADE/);
 assert.match(studentProgressMigration,/verified boolean NOT NULL DEFAULT false CHECK \(verified = false\)/);
 assert.match(studentProgressMigration,/grade text NOT NULL CHECK/);
+const studentProfileGoalsMigration=fs.readFileSync(new URL('../supabase/migrations/20261026120000_student_profile_goals.sql',import.meta.url),'utf8');
+assert.match(studentProfileGoalsMigration,/total_program_credits smallint CHECK \(total_program_credits BETWEEN 1 AND 1000\)/);
+assert.match(studentProfileGoalsMigration,/target_gpa numeric\(3,2\) CHECK \(target_gpa BETWEEN 0 AND 4\)/);
 const seed=fs.readFileSync(new URL('../supabase/seed.sql',import.meta.url),'utf8');
 assert.match(seed,/INSERT INTO course_prerequisite_groups[\s\S]*legacy_relation_id[\s\S]*INSERT INTO course_prerequisite_group_members/,
   'canonical seeded prerequisite links retain one mandatory group per legacy relationship');

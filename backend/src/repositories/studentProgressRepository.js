@@ -1,14 +1,25 @@
 export async function getStudentProgress(executor, userId) {
-  const profile = await executor.query(`SELECT sap.program_id, p.name AS program_name FROM public.student_academic_profiles sap
-    JOIN public.programs p ON p.id=sap.program_id WHERE sap.user_id=$1 AND p.deleted_at IS NULL`, [userId]);
+  const profile = await executor.query(`SELECT sap.program_id, p.name AS program_name, p.faculty_id, f.name AS faculty_name,
+      sap.total_program_credits, sap.target_gpa
+    FROM public.student_academic_profiles sap JOIN public.programs p ON p.id=sap.program_id
+    JOIN public.faculties f ON f.id=p.faculty_id
+    WHERE sap.user_id=$1 AND p.deleted_at IS NULL AND f.deleted_at IS NULL`, [userId]);
   const attempts = await executor.query(`SELECT a.id,a.program_id,a.program_course_id,a.grade,a.academic_year,a.term,pc.code,c.name AS course_name,pc.credits
     FROM public.student_course_attempts a JOIN public.program_courses pc ON pc.id=a.program_course_id
     JOIN public.courses c ON c.id=pc.course_id WHERE a.user_id=$1 ORDER BY a.academic_year,a.term,pc.code,a.created_at`, [userId]);
   return { profile: profile.rows[0] || null, attempts: attempts.rows };
 }
-export async function upsertStudentAcademicProfile(executor, userId, programId) {
-  return executor.query(`INSERT INTO public.student_academic_profiles(user_id,program_id,verified) VALUES ($1,$2,false)
-    ON CONFLICT(user_id) DO UPDATE SET program_id=EXCLUDED.program_id,updated_at=now() RETURNING user_id,program_id`, [userId,programId]);
+export async function upsertStudentAcademicProfile(executor, userId, programId, profile = {}) {
+  return executor.query(`INSERT INTO public.student_academic_profiles(user_id,program_id,verified,total_program_credits,target_gpa)
+      VALUES ($1,$2,false,$5,$6)
+    ON CONFLICT(user_id) DO UPDATE SET program_id=EXCLUDED.program_id,
+      total_program_credits=CASE WHEN $3::boolean THEN EXCLUDED.total_program_credits
+        WHEN student_academic_profiles.program_id=EXCLUDED.program_id THEN student_academic_profiles.total_program_credits ELSE NULL END,
+      target_gpa=CASE WHEN $4::boolean THEN EXCLUDED.target_gpa
+        WHEN student_academic_profiles.program_id=EXCLUDED.program_id THEN student_academic_profiles.target_gpa ELSE NULL END,
+      updated_at=now()
+    RETURNING user_id,program_id,total_program_credits,target_gpa`,
+  [userId,programId,Object.hasOwn(profile,'totalProgramCredits'),Object.hasOwn(profile,'targetGpa'),profile.totalProgramCredits ?? null,profile.targetGpa ?? null]);
 }
 export async function listProgramCourseCredits(executor, programId) {
   return executor.query(`SELECT pc.id,pc.code,c.name,pc.credits FROM public.program_courses pc JOIN public.courses c ON c.id=pc.course_id

@@ -560,15 +560,112 @@ function showHierarchyView(courseId) {
   elements.modalTitle.textContent = `Course Hierarchy - ${course.code}`;
   elements.modalBody.innerHTML = `
     <div class="hierarchy-view-boxes">
-      <div class="hierarchy-level"><h6>Prerequisites (${escapeHtml(prerequisites.length)})</h6><div class="hierarchy-prerequisite-groups">${mandatoryPrerequisites.length ? `<section class="hierarchy-prerequisite-group hierarchy-prerequisite-group--mandatory"><h6>All required</h6><div class="hierarchy-row" role="region" aria-label="Mandatory prerequisite courses">${mandatoryPrerequisites.map(item => hierarchyCard(item)).join('')}</div></section>` : ''}${alternativePrerequisiteGroups.map(group => `<section class="hierarchy-prerequisite-group hierarchy-prerequisite-group--alternative"><h6>Complete either one · ${escapeHtml(group.label)}</h6><div class="hierarchy-row" role="region" aria-label="Alternative prerequisite courses">${group.members.map(item => hierarchyCard(item)).join('') || '<span class="no-prereq">No active options</span>'}</div></section>`).join('') || (!mandatoryPrerequisites.length ? '<span class="no-prereq">None</span>' : '')}</div></div>
+      <div class="hierarchy-level hierarchy-level--prerequisites"><h6>Prerequisites (${escapeHtml(prerequisites.length)})</h6><div class="hierarchy-prerequisite-groups">${mandatoryPrerequisites.length ? `<section class="hierarchy-prerequisite-group hierarchy-prerequisite-group--mandatory"><h6>All required</h6><div class="hierarchy-row" role="region" aria-label="Mandatory prerequisite courses">${mandatoryPrerequisites.map(item => hierarchyCard(item, false, 'prerequisite')).join('')}</div></section>` : ''}${alternativePrerequisiteGroups.map(group => `<section class="hierarchy-prerequisite-group hierarchy-prerequisite-group--alternative"><h6>Complete either one · ${escapeHtml(group.label)}</h6><div class="hierarchy-row" role="region" aria-label="Alternative prerequisite courses">${group.members.map(item => hierarchyCard(item, false, 'prerequisite')).join('') || '<span class="no-prereq">No active options</span>'}</div></section>`).join('') || (!mandatoryPrerequisites.length ? '<span class="no-prereq">None</span>' : '')}</div></div>
       <div class="hierarchy-center-wrapper">${hierarchyCard(course, true)}</div>
-      <div class="hierarchy-level"><h6>Required For (${escapeHtml(dependents.length)})</h6><div class="hierarchy-row">${dependents.map((item) => hierarchyCard(item)).join('') || '<span class="no-prereq">None</span>'}</div></div>
+      <div class="hierarchy-level hierarchy-level--dependents"><h6>Required For (${escapeHtml(dependents.length)})</h6><div class="hierarchy-row" role="region" aria-label="Courses that require this course">${dependents.map((item) => hierarchyCard(item, false, 'dependent')).join('') || '<span class="no-prereq">None</span>'}</div></div>
+      <svg class="hierarchy-relationship-layer" aria-hidden="true" focusable="false"></svg>
+      <p class="hierarchy-focus-status" aria-live="polite" aria-atomic="true">Hover, focus, or tap a related course to trace its connection.</p>
     </div>
   `;
   const hierarchyRoot = elements.modalBody.querySelector('.hierarchy-view-boxes');
+  let activeRelationship = null;
+  let inputMode = 'pointer';
+  let relationshipSequence = 0;
+  let drawFrame = 0;
+  const schedulePathDraw = () => {
+    cancelAnimationFrame(drawFrame);
+    drawFrame = requestAnimationFrame(() => {
+      if (activeRelationship) drawHierarchyPath(hierarchyRoot, activeRelationship.prerequisite, activeRelationship.dependent, activeRelationship.label);
+    });
+  };
+  const focusTarget = (card) => {
+    const sequence = ++relationshipSequence;
+    hierarchyRoot.querySelectorAll('.hierarchy-card.is-focused, .hierarchy-card.is-related').forEach(item => item.classList.remove('is-focused', 'is-related'));
+    hierarchyRoot.querySelectorAll('.hierarchy-card.is-tracing').forEach(item => item.classList.remove('is-tracing'));
+    hierarchyRoot.classList.remove('has-focus');
+    const layer = hierarchyRoot.querySelector('.hierarchy-relationship-layer');
+    layer.replaceChildren();
+    activeRelationship = null;
+    if (!card || card.classList.contains('current')) {
+      hierarchyRoot.querySelector('.hierarchy-focus-status').textContent = 'Hover, focus, or tap a related course to trace its connection.';
+      return;
+    }
+    hierarchyRoot.classList.add('has-focus'); card.classList.add('is-focused');
+    const isPrerequisite = card.dataset.relationKind === 'prerequisite';
+    const oppositeRows = [...hierarchyRoot.querySelectorAll(isPrerequisite ? '.hierarchy-level--dependents .hierarchy-row' : '.hierarchy-prerequisite-groups .hierarchy-row')];
+    const oppositeCards = oppositeRows.flatMap(row => [...row.querySelectorAll('.hierarchy-card[data-course-id]')]);
+    const pairedCards = oppositeCards.filter(item => isPrerequisite
+      ? (courseById(Number(item.dataset.courseId))?.prerequisiteCourseIds || []).some(id => Number(id) === Number(card.dataset.courseId))
+      : (courseById(Number(card.dataset.courseId))?.prerequisiteCourseIds || []).some(id => Number(id) === Number(item.dataset.courseId)));
+    if (!pairedCards.length) {
+      hierarchyRoot.querySelector('.hierarchy-focus-status').textContent = 'No directly matching course appears in the opposite row.';
+      return;
+    }
+    pairedCards.forEach(item => item.classList.add('is-related'));
+    const relatedCodes = pairedCards.map(item => item.dataset.courseCode);
+    const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const traceMatches = async () => {
+      for (let index = 0; index < pairedCards.length; index += 1) {
+        if (sequence !== relationshipSequence) return;
+        const paired = pairedCards[index];
+        hierarchyRoot.querySelectorAll('.hierarchy-card.is-tracing').forEach(item => item.classList.remove('is-tracing'));
+        paired.classList.add('is-tracing');
+        const prerequisiteCard = isPrerequisite ? card : paired;
+        const dependentCard = isPrerequisite ? paired : card;
+        const prerequisite = courseById(Number(prerequisiteCard.dataset.courseId));
+        const dependent = courseById(Number(dependentCard.dataset.courseId));
+        const prerequisiteState = courseCompletionState(prerequisite);
+        const selectedState = courseCompletionState(course);
+        const relevantState = isPrerequisite ? prerequisiteState : selectedState;
+        const statusMessage = relevantState.uncertain
+          ? `Multiple ${isPrerequisite ? prerequisite.code : course.code} attempts are recorded; the university repeat policy is needed to confirm this prerequisite for ${dependent.code}.`
+          : relevantState.passed
+            ? `${isPrerequisite ? prerequisite.code : course.code} is completed and satisfies its prerequisite link for ${dependent.code}.`
+            : `Complete ${isPrerequisite ? prerequisite.code : course.code} to satisfy a prerequisite requirement for ${dependent.code}.`;
+        const label = relevantState.uncertain ? 'REPEAT POLICY' : relevantState.passed ? 'PREREQUISITE SATISFIED' : 'COMPLETE TO UNLOCK';
+        activeRelationship = { prerequisite: prerequisiteCard, dependent: dependentCard, label };
+        const oppositeRow = paired.closest('.hierarchy-row');
+        oppositeRow.scrollTo({ left: centeredScrollPosition(paired, oppositeRow), behavior: reduceMotion ? 'auto' : 'smooth' });
+        schedulePathDraw();
+        hierarchyRoot.querySelector('.hierarchy-focus-status').textContent = `${index + 1} of ${pairedCards.length}. ${statusMessage}`;
+        if (pairedCards.length > 1 && !reduceMotion) await new Promise(resolve => setTimeout(resolve, 700));
+      }
+      if (sequence !== relationshipSequence) return;
+      const relationText = isPrerequisite
+        ? `Prerequisite ${card.dataset.courseCode} is linked to ${pairedCards.length} required-for course${pairedCards.length === 1 ? '' : 's'}: ${relatedCodes.join(', ')}.`
+        : `${card.dataset.courseCode} requires ${pairedCards.length} prerequisite course${pairedCards.length === 1 ? '' : 's'}: ${relatedCodes.join(', ')}.`;
+      hierarchyRoot.querySelector('.hierarchy-focus-status').textContent = relationText;
+    };
+    traceMatches();
+  };
+  hierarchyRoot?.addEventListener('pointerover', event => {
+    inputMode = event.pointerType === 'touch' ? 'touch' : 'pointer';
+    const card = event.target.closest('.hierarchy-card[data-relation-kind]');
+    if (card && !card.contains(event.relatedTarget)) focusTarget(card);
+  });
+  hierarchyRoot?.addEventListener('pointerout', event => {
+    if (event.pointerType === 'touch') return;
+    const fromCard = event.target.closest('.hierarchy-card[data-relation-kind]');
+    if (!fromCard || fromCard.contains(event.relatedTarget)) return;
+    const nextCard = event.relatedTarget?.closest?.('.hierarchy-card[data-relation-kind]');
+    if (nextCard) focusTarget(nextCard);
+    else {
+      const focusedCard = document.activeElement?.closest?.('.hierarchy-card[data-relation-kind]');
+      focusTarget(inputMode === 'keyboard' && focusedCard && hierarchyRoot.contains(focusedCard) ? focusedCard : null);
+    }
+  });
+  hierarchyRoot?.addEventListener('focusin', event => { const card = event.target.closest('.hierarchy-card[data-relation-kind]'); if (inputMode !== 'touch' && card) focusTarget(card); });
+  hierarchyRoot?.addEventListener('focusout', event => { if (!hierarchyRoot.contains(event.relatedTarget) && !hierarchyRoot.matches(':hover')) focusTarget(null); });
+  hierarchyRoot?.addEventListener('click', event => { const card = event.target.closest('.hierarchy-card[data-relation-kind]'); if (inputMode !== 'touch' && card && !card.classList.contains('is-focused') && !event.target.closest('[data-action="open-related"]')) focusTarget(card); });
+  hierarchyRoot?.addEventListener('keydown', event => { if (['Tab','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Enter',' '].includes(event.key)) inputMode = 'keyboard'; }, true);
   hierarchyRoot?.addEventListener('click', (event) => {
     const card = event.target.closest('.hierarchy-card[data-course-id]:not(.current)');
     if (!card || !hierarchyRoot.contains(card)) return;
+    if (inputMode === 'touch' && !card.classList.contains('is-focused')) {
+      focusTarget(card);
+      hierarchyRoot.querySelector('.hierarchy-focus-status').textContent += ' Tap the highlighted course again to open its actions.';
+      return;
+    }
     openRelatedCourse(Number(card.dataset.courseId));
   });
   hierarchyRoot?.addEventListener('keydown', (event) => {
@@ -578,12 +675,29 @@ function showHierarchyView(courseId) {
     event.preventDefault();
     openRelatedCourse(Number(card.dataset.courseId));
   });
+  hierarchyRoot?.querySelectorAll('.hierarchy-row').forEach(row => row.addEventListener('scroll', schedulePathDraw, { passive: true }));
+  hierarchyRoot?.addEventListener('wheel', event => {
+    const hoveredRow = event.target.closest('.hierarchy-row');
+    // Vertical wheel input over the center/blank hierarchy space must keep scrolling
+    // the modal/page vertically. Only explicit horizontal gestures, or vertical
+    // wheel input while directly over a course strip, move that strip sideways.
+    if (!hoveredRow || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+    if (hoveredRow.scrollWidth <= hoveredRow.clientWidth + 1) return;
+    hoveredRow.scrollLeft += event.deltaY;
+    event.preventDefault();
+  }, { passive: false });
+  if (typeof ResizeObserver !== 'undefined') {
+    elements.modalBody._hierarchyResizeObserver?.disconnect();
+    const hierarchyResizeObserver = new ResizeObserver(schedulePathDraw);
+    hierarchyResizeObserver.observe(hierarchyRoot);
+    elements.modalBody._hierarchyResizeObserver = hierarchyResizeObserver;
+  }
   elements.courseModal.classList.add('active');
   elements.courseModal.dataset.courseId = String(course.id);
   document.body.style.overflow = 'hidden';
 }
 
-function hierarchyCard(course, current = false) {
+function hierarchyCard(course, current = false, relationKind = '') {
   const progress = state.data.academicProgress;
   const attempts = progress?.attempts?.filter(attempt => Number(attempt.programCourseId) === Number(course.id)) || [];
   const latest = attempts.at(-1);
@@ -596,10 +710,63 @@ function hierarchyCard(course, current = false) {
   const eligibilityLabel = !eligibility ? '' : eligibility.status==='unknown' ? eligibility.reason
     : eligibility.eligible && successfulAlternative ? `Eligible through ${successfulAlternative.label}: ${successfulAlternative.passed.join(', ')} passed; ${successfulAlternative.remaining.length ? `${successfulAlternative.remaining.join(', ')} remain alternatives` : 'alternative group satisfied'}`
       : eligibility.eligible ? 'Eligible — prerequisite groups satisfied' : `Not yet eligible — ${eligibility.reason}`;
-  return `<div class="hierarchy-card ${current ? 'current' : ''} academic-status-${status.kind}" data-course-id="${escapeHtml(course.id)}" ${current ? '' : 'role="button" tabindex="0"'} aria-label="${current ? 'Current course' : 'Open related course'} ${escapeHtml(course.code)}">
+  return `<div class="hierarchy-card ${current ? 'current' : ''} academic-status-${status.kind}" data-course-id="${escapeHtml(course.id)}" data-course-code="${escapeHtml(course.code)}" ${relationKind ? `data-relation-kind="${relationKind}"` : ''} ${current ? '' : 'role="button" tabindex="0"'} aria-label="${current ? 'Current course' : `${relationKind === 'dependent' ? 'Required for this course' : 'Prerequisite of this course'}: ${course.code}. Activate to open course choices.`}">
     <div class="hierarchy-card-header"><span class="hierarchy-card-code">${escapeHtml(course.code)}</span></div>
     <div class="hierarchy-card-body"><h4 class="hierarchy-card-title">${escapeHtml(course.name)}</h4><p class="hierarchy-academic-status">${escapeHtml(status.label)}</p>${eligibilityLabel ? `<p class="hierarchy-academic-eligibility">${escapeHtml(eligibilityLabel)}</p>` : ''}</div>
   </div>`;
+}
+
+function centeredScrollPosition(card, row) {
+  const cardRect = card.getBoundingClientRect();
+  const rowRect = row.getBoundingClientRect();
+  return Math.max(0, Math.min(row.scrollWidth - row.clientWidth,
+    row.scrollLeft + cardRect.left - rowRect.left - (row.clientWidth - cardRect.width) / 2));
+}
+
+function courseCompletionState(course) {
+  const attempts = state.data.academicProgress?.attempts?.filter(attempt => Number(attempt.programCourseId) === Number(course?.id)) || [];
+  const passedAttempts = attempts.filter(attempt => attempt.grade !== 'F');
+  return { passed: passedAttempts.length === 1, attempts, uncertain: attempts.length > 1 };
+}
+
+function drawHierarchyPath(root, source, target, label) {
+  const svg = root.querySelector('.hierarchy-relationship-layer');
+  const bounds = root.getBoundingClientRect();
+  const sourceBox = source.getBoundingClientRect();
+  const targetBox = target.getBoundingClientRect();
+  const center = root.querySelector('.hierarchy-card.current')?.getBoundingClientRect();
+  if (!bounds.width || !bounds.height || !center) return;
+  svg.setAttribute('viewBox', `0 0 ${bounds.width} ${bounds.height}`);
+  svg.setAttribute('width', bounds.width);
+  svg.setAttribute('height', bounds.height);
+  const point = box => ({ x: box.left - bounds.left + box.width / 2, y: box.top - bounds.top + box.height / 2 });
+  const from = point(sourceBox), mid = point(center), to = point(targetBox);
+  const sourceStart = { x: from.x, y: sourceBox.bottom - bounds.top };
+  const centerEntry = { x: mid.x, y: center.top - bounds.top };
+  const centerExit = { x: mid.x, y: center.bottom - bounds.top };
+  const targetEnd = { x: to.x, y: targetBox.top - bounds.top };
+  const laneX = Math.max(12, Math.min(bounds.width - 12, mid.x + (from.x < mid.x ? 1 : -1) * (center.width / 2 + 22)));
+  const ns = 'http://www.w3.org/2000/svg';
+  const defs = document.createElementNS(ns, 'defs');
+  defs.innerHTML = '<marker id="hierarchy-arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/></marker>';
+  svg.replaceChildren(defs);
+  const firstPath = document.createElementNS(ns, 'path');
+  firstPath.setAttribute('class', 'hierarchy-relationship-path');
+  firstPath.setAttribute('d', `M ${sourceStart.x} ${sourceStart.y} C ${sourceStart.x} ${(sourceStart.y + centerEntry.y) / 2}, ${laneX} ${(sourceStart.y + centerEntry.y) / 2}, ${laneX} ${centerEntry.y} L ${centerEntry.x} ${centerEntry.y}`);
+  firstPath.setAttribute('marker-end', 'url(#hierarchy-arrowhead)');
+  const secondPath = document.createElementNS(ns, 'path');
+  secondPath.setAttribute('class', 'hierarchy-relationship-path');
+  secondPath.setAttribute('d', `M ${centerExit.x} ${centerExit.y} L ${laneX} ${centerExit.y} L ${laneX} ${(centerExit.y + targetEnd.y) / 2} C ${laneX} ${(centerExit.y + targetEnd.y) / 2}, ${targetEnd.x} ${(centerExit.y + targetEnd.y) / 2}, ${targetEnd.x} ${targetEnd.y}`);
+  secondPath.setAttribute('marker-end', 'url(#hierarchy-arrowhead)');
+  svg.append(firstPath, secondPath);
+  const text = document.createElementNS(ns, 'text');
+  text.setAttribute('class', 'hierarchy-relationship-label');
+  const laneOnRight = laneX > mid.x;
+  text.setAttribute('x', String(Math.max(12, Math.min(bounds.width - 12, laneX + (laneOnRight ? 8 : -8)))));
+  text.setAttribute('text-anchor', laneOnRight ? 'start' : 'end');
+  text.setAttribute('y', String(Math.max(12, centerEntry.y - 8)));
+  text.textContent = label;
+  svg.append(text);
 }
 
 function openRelatedCourse(courseId) {

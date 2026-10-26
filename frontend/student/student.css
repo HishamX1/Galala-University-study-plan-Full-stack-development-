@@ -1140,6 +1140,8 @@
    ============================================ */
 
 .hierarchy-view-boxes {
+  position: relative;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1182,6 +1184,8 @@
 .hierarchy-prerequisite-group--alternative { padding-top:var(--space-2); border-top:1px solid var(--gu-gray-200); }
 
 .hierarchy-card {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   background: var(--gu-white);
@@ -1202,6 +1206,17 @@
   box-shadow: 0 12px 28px rgba(0, 33, 71, 0.12);
   border-color: var(--gu-gray-200);
 }
+.hierarchy-view-boxes.has-focus .hierarchy-row .hierarchy-card { scroll-snap-align:center; }
+
+.hierarchy-view-boxes.has-focus .hierarchy-card[data-relation-kind] { opacity:.3; filter:saturate(.55); transition:opacity .22s ease,filter .22s ease,transform .22s ease,box-shadow .22s ease; }
+.hierarchy-view-boxes.has-focus .hierarchy-card.is-focused,.hierarchy-view-boxes.has-focus .hierarchy-card.is-related { opacity:1; filter:none; transform:translateY(-3px) scale(1.015); box-shadow:0 14px 30px rgba(0,33,71,.2); }
+.hierarchy-view-boxes.has-focus .hierarchy-card.is-tracing { outline:3px solid var(--gu-gold); outline-offset:3px; }
+.hierarchy-view-boxes.has-focus .hierarchy-card.is-focused { outline:3px solid var(--gu-gold); outline-offset:2px; }
+.hierarchy-relationship-layer { position:absolute; inset:0; z-index:2; width:100%; height:100%; overflow:visible; pointer-events:none; color:var(--gu-navy); }
+.hierarchy-relationship-path { fill:none; stroke:currentColor; stroke-width:2.5; stroke-dasharray:8 6; animation:hierarchy-path-flow 1.1s linear infinite; }
+.hierarchy-relationship-label { fill:currentColor; stroke:var(--gu-white); stroke-width:4px; paint-order:stroke; font:700 11px var(--font-body); }
+.hierarchy-focus-status { position:relative; z-index:3; margin:0; min-height:1.4em; color:var(--gu-gray-600); font-size:var(--text-xs); text-align:center; }
+@keyframes hierarchy-path-flow { to { stroke-dashoffset:-28; } }
 
 .hierarchy-academic-status,.hierarchy-academic-eligibility { margin:var(--space-2) 0 0; font-size:var(--text-xs); color:var(--gu-gray-600); }
 .hierarchy-card.academic-status-passed { border-top-color:#16834a; }
@@ -1370,4 +1385,9 @@
 
 .dependent-card:hover {
   border-color: var(--gu-success);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hierarchy-view-boxes.has-focus .hierarchy-card[data-relation-kind] { transition:none; }
+  .hierarchy-relationship-path { animation:none; stroke-dasharray:none; }
 }
