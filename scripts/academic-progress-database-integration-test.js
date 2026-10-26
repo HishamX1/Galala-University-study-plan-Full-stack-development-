@@ -19,9 +19,16 @@ try {
   const program=(await query('SELECT id FROM public.programs WHERE deleted_at IS NULL ORDER BY id LIMIT 1')).rows[0];
   const course=(await query('SELECT id,credits FROM public.program_courses WHERE program_id=$1 AND deleted_at IS NULL AND credits>0 ORDER BY id LIMIT 1',[program.id])).rows[0];
   assert.ok(program && course,'seeded program and positive-credit course are required');
-  const saved=await saveOwnAcademicProgress(first,{programId:Number(program.id),attempts:[{programCourseId:Number(course.id),grade:'B+',academicYear:2026,term:'Fall'}]});
+  const saved=await saveOwnAcademicProgress(first,{programId:Number(program.id),totalProgramCredits:180,targetGpa:3.5,attempts:[{programCourseId:Number(course.id),grade:'B+',academicYear:2026,term:'Fall'}]});
   assert.equal(saved.attempts.length,1);
   assert.equal(saved.termGpa[0].available,true);
+  assert.equal(saved.profile.totalProgramCredits,180,'student-reported total program credits persist in the owner profile');
+  assert.equal(saved.profile.targetGpa,3.5,'student GPA goal persists in the owner profile');
+  assert.ok(saved.profile.facultyId && saved.profile.facultyName,'faculty is derived from the selected program');
+  await assert.rejects(()=>saveOwnAcademicProgress(first,{programId:Number(program.id),totalProgramCredits:0,targetGpa:4.5,attempts:[]}));
+  const afterInvalidProfile=await readOwnAcademicProgress(first);
+  assert.equal(afterInvalidProfile.profile.totalProgramCredits,180,'invalid profile updates do not overwrite saved settings');
+  assert.equal(afterInvalidProfile.profile.targetGpa,3.5,'invalid target values are rejected before persistence');
   assert.equal((await readOwnAcademicProgress(second)).attempts.length,0,'one student cannot read another student attempts');
   await assert.rejects(()=>saveOwnAcademicProgress({id:first.id,role:'regular_admin'},{programId:Number(program.id),attempts:[]}),/permission/i);
   await assert.rejects(()=>saveOwnAcademicProgress(first,{programId:Number(program.id),attempts:[{programCourseId:999999,grade:'A',academicYear:2026,term:'Fall'}]}));
