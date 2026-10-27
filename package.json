@@ -15,6 +15,7 @@
     "test:password-reset-email-provider": "node scripts/password-reset-email-provider-test.js",
     "test:password-reset-email": "node scripts/password-reset-email-integration-test.js",
     "test:session": "node scripts/session-e2e-test.js",
+    "test:session-idle": "node scripts/session-idle-test.js",
     "test:refresh-rollback": "node scripts/refresh-transaction-rollback-test.js",
     "test:student-portal": "node scripts/student-portal-regression-test.js",
     "test:dashboard": "node scripts/dashboard-contract-test.js",

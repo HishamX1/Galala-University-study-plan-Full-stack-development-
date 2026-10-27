@@ -5,6 +5,88 @@ const SESSION_ROLES = new Set(['student', 'regular_admin', 'super_admin']);
 let restoreInFlight = null;
 let authStateGeneration = 0;
 const SESSION_TIMEOUT_MS = 12_000;
+export const IDLE_SESSION_TIMEOUT_MS = 300_000;
+const LAST_ACTIVITY_KEY = 'guAuthLastActivity';
+const SESSION_TIMEOUT_EVENT_KEY = 'guAuthSessionTimedOut';
+let inactivitySession = null;
+
+function timeoutHomeUrl(landingPath, role, expired = false, serverUnconfirmed = false) {
+  const target = new URL(landingPath, location.href || 'http://localhost/');
+  target.searchParams.set(expired ? 'sessionExpired' : 'sessionTimeout', role);
+  if (serverUnconfirmed) target.searchParams.set('logout', 'server-unconfirmed');
+  return location.href ? target.href : `${target.pathname}${target.search}${target.hash}`;
+}
+
+export function stopInactivityTimeout() {
+  if (!inactivitySession) return;
+  clearTimeout(inactivitySession.timer);
+  for (const [target, type, listener, options] of inactivitySession.listeners) target.removeEventListener(type, listener, options);
+  inactivitySession = null;
+}
+
+export function startInactivityTimeout(user, landingPath, idleMs = IDLE_SESSION_TIMEOUT_MS) {
+  stopInactivityTimeout();
+  if (!isValidSessionUser(user) || !Number.isFinite(idleMs) || idleMs <= 0) return () => {};
+  let lastActivity = Date.now();
+  try { localStorage.setItem(LAST_ACTIVITY_KEY, String(lastActivity)); } catch { /* Timer remains per-tab when storage is unavailable. */ }
+  let lastPointerMove = 0;
+  const session = { timer: null, listeners: [] };
+  inactivitySession = session;
+
+  const schedule = () => {
+    clearTimeout(session.timer);
+    session.timer = setTimeout(checkIdle, Math.max(0, idleMs - (Date.now() - lastActivity)));
+  };
+  const checkIdle = () => {
+    try {
+      const shared = Number(localStorage.getItem(LAST_ACTIVITY_KEY));
+      if (Number.isFinite(shared) && shared > lastActivity) lastActivity = shared;
+    } catch { /* Keep the in-memory activity timestamp. */ }
+    if (Date.now() - lastActivity >= idleMs) {
+      stopInactivityTimeout();
+      void signOut(landingPath, { sessionTimeoutRole: user.role });
+      return;
+    }
+    schedule();
+  };
+  const onActivity = (event) => {
+    if (event?.type === 'pointermove') {
+      const now = Date.now();
+      if (now - lastPointerMove < 1000) return;
+      lastPointerMove = now;
+    }
+    if (Date.now() - lastActivity >= idleMs) { checkIdle(); return; }
+    lastActivity = Date.now();
+    try { localStorage.setItem(LAST_ACTIVITY_KEY, String(lastActivity)); } catch { /* Timer remains per-tab when storage is unavailable. */ }
+    schedule();
+  };
+  const onStorage = (event) => {
+    if (event.key === LAST_ACTIVITY_KEY) {
+      const shared = Number(event.newValue);
+      if (Number.isFinite(shared) && shared > lastActivity) { lastActivity = shared; schedule(); }
+      return;
+    }
+    if (event.key !== SESSION_TIMEOUT_EVENT_KEY || !event.newValue) return;
+    try {
+      const timeout = JSON.parse(event.newValue);
+      if (!['student', 'regular_admin', 'super_admin'].includes(timeout.role) || !Number.isFinite(timeout.at)) return;
+      stopInactivityTimeout();
+      clearAuthenticatedState();
+      location.replace(timeoutHomeUrl(landingPath, timeout.role, timeout.expired, timeout.serverUnconfirmed));
+    } catch { /* Ignore malformed cross-tab messages. */ }
+  };
+  const activityOptions = { passive: true };
+  for (const type of ['pointerdown', 'pointermove', 'keydown', 'input', 'click', 'touchstart', 'wheel']) {
+    window.addEventListener(type, onActivity, activityOptions);
+    session.listeners.push([window, type, onActivity, activityOptions]);
+  }
+  window.addEventListener('storage', onStorage);
+  session.listeners.push([window, 'storage', onStorage]);
+  document.addEventListener('visibilitychange', checkIdle);
+  session.listeners.push([document, 'visibilitychange', checkIdle]);
+  schedule();
+  return stopInactivityTimeout;
+}
 
 export function clearAuthenticatedState() {
   authStateGeneration += 1;
@@ -77,7 +159,8 @@ export function restoreSession() {
 export function portalPath(portal, from = '.') { return portal === 'student' ? `${from}/student/index.html` : `${from}/admin/index.html`; }
 
 let signOutInFlight = null;
-async function performSignOut(landingPath) {
+async function performSignOut(landingPath, options = {}) {
+  stopInactivityTimeout();
   clearAuthenticatedState();
   const overlay = typeof document !== 'undefined' ? (document.getElementById?.('adminLoadingOverlay') || document.getElementById?.('dashboardLoadingOverlay') || document.getElementById?.('studentLoadingOverlay')) : null;
   const loadingLabel = typeof document !== 'undefined' ? (document.getElementById?.('adminLoadingMessage') || document.getElementById?.('dashboardLoadingMessage') || document.getElementById?.('studentLoadingMessage')) : null;
@@ -96,15 +179,19 @@ async function performSignOut(landingPath) {
     finally { clearTimeout(timeout); }
   }
   clearAuthenticatedState();
-  const target = new URL(landingPath, location.href || 'http://localhost/');
-  if (!revocationConfirmed) target.searchParams.set('logout', 'server-unconfirmed');
+  const timeoutRole = options.sessionTimeoutRole || options.sessionExpiredRole;
+  if (timeoutRole) {
+    try { localStorage.setItem(SESSION_TIMEOUT_EVENT_KEY, JSON.stringify({ at: Date.now(), role: timeoutRole, expired: Boolean(options.sessionExpiredRole), serverUnconfirmed: !revocationConfirmed })); } catch { /* Current tab still receives a specific timeout message in the landing URL. */ }
+  }
   if (overlay) overlay.hidden = true;
-  location.replace(location.href ? target.href : `${target.pathname}${target.search}${target.hash}`);
+  location.replace(timeoutRole
+    ? timeoutHomeUrl(landingPath, timeoutRole, Boolean(options.sessionExpiredRole), !revocationConfirmed)
+    : (() => { const target = new URL(landingPath, location.href || 'http://localhost/'); if (!revocationConfirmed) target.searchParams.set('logout', 'server-unconfirmed'); return location.href ? target.href : `${target.pathname}${target.search}${target.hash}`; })());
 }
 
-export function signOut(landingPath = './index.html') {
+export function signOut(landingPath = './index.html', options = {}) {
   if (signOutInFlight) return signOutInFlight;
-  const pending = performSignOut(landingPath);
+  const pending = performSignOut(landingPath, options);
   signOutInFlight = pending;
   const clearIfCurrent = () => { if (signOutInFlight === pending) signOutInFlight = null; };
   pending.then(clearIfCurrent, clearIfCurrent);

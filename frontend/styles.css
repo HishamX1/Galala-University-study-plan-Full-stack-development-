@@ -704,5 +704,6 @@ pre {
 .gu-loading-screen[hidden] { display: none; }
 .gu-loading-screen img { width: min(220px, 60vw); max-height: 90px; object-fit: contain; background: #fff; border-radius: .75rem; padding: .75rem; }
 .gu-loading-spinner { display: inline-block; width: 2rem; height: 2rem; border: 3px solid rgba(255,255,255,.35); border-top-color: #d4af37; border-radius: 50%; animation: gu-spin .8s linear infinite; }
+.session-return-notice { max-width:1180px; margin:14px auto; padding:14px 18px; border:1px solid #eedb9a; border-radius:12px; background:#fff8df; color:#604800; font-weight:650; line-height:1.5; }
 @keyframes gu-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .gu-loading-spinner { animation: none; } }

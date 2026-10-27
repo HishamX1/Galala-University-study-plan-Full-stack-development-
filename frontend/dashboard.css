@@ -24,3 +24,50 @@ body { margin:0; background:#f5f7fb; color:#172033; font-family:Inter,Cairo,syst
 @keyframes gpa-icon-draw { to { stroke-dashoffset:0; } }@keyframes gpa-card-enter { from { opacity:0; transform:translateY(10px) scale(.985); } to { opacity:1; transform:translateY(0) scale(1); } }
 @media(max-width:760px){.gpa-goal-grid{grid-template-columns:1fr}.gpa-goal-card{grid-template-columns:56px minmax(0,1fr);padding:13px}.gpa-goal-icon{width:52px;height:52px}}
 @media(prefers-reduced-motion:reduce){.gpa-goal-card{animation:none}.gpa-icon-path,.gpa-target-ring{animation:none;stroke-dashoffset:0}}
+.academic-setup-progress { display:grid; gap:7px; padding:12px 14px; border:1px solid #e4eaf2; border-radius:11px; background:linear-gradient(110deg,#f8fbff,#fff); }
+.academic-setup-progress>div { display:flex; align-items:center; justify-content:space-between; gap:12px; color:var(--dash-navy); }
+.academic-setup-progress span { color:var(--dash-muted); font-size:.85rem; font-variant-numeric:tabular-nums; }
+.academic-setup-progress progress { width:100%; height:9px; accent-color:#087443; }
+.academic-setup-progress p { margin:0; color:var(--dash-muted); font-size:.85rem; line-height:1.45; }
+.academic-save-bar { position:sticky; bottom:10px; z-index:3; display:flex; align-items:center; justify-content:space-between; gap:12px; margin:14px -4px 0; padding:10px 12px; border:1px solid #dce4ee; border-radius:12px; background:rgba(255,255,255,.96); box-shadow:0 8px 24px rgba(0,33,71,.14); backdrop-filter:blur(10px); }
+.academic-save-bar p { margin:0; color:var(--dash-muted); font-size:.9rem; }
+.academic-record-summary { display:grid; grid-template-columns:1fr auto; gap:4px 12px; align-items:baseline; margin:12px 0; padding:13px 15px; border-left:4px solid var(--dash-gold); border-radius:10px; background:#f8fbff; animation:gpa-card-enter .4s ease-out both; }
+.academic-record-summary strong { color:var(--dash-navy); }.academic-record-summary span { color:#087443; font-weight:800; font-variant-numeric:tabular-nums; }.academic-record-summary small { grid-column:1/-1; color:var(--dash-muted); line-height:1.4; }
+.academic-save-bar button[aria-busy="true"] { opacity:.75; cursor:progress; }
+.academic-save-bar.is-saved { animation:academic-save-confirm .45s ease-out; }
+@keyframes academic-save-confirm { 50% { transform:translateY(-2px); box-shadow:0 12px 30px rgba(8,116,67,.18); } }
+@media(max-width:560px){.academic-save-bar{align-items:stretch;flex-direction:column}.academic-save-bar button{min-height:46px}.academic-setup-progress>div{align-items:flex-start;flex-direction:column;gap:2px}.academic-record-summary{grid-template-columns:1fr}.academic-record-summary span{grid-row:2}.academic-record-summary small{grid-row:3}}
+@media(prefers-reduced-motion:reduce){.academic-save-bar.is-saved,.academic-record-summary{animation:none}}
+.quick-action { font:inherit; background:#fff; text-align:left; cursor:pointer; }
+.quick-action:focus-visible { outline:3px solid var(--dash-gold); outline-offset:2px; }
+.academic-progress-overview { margin:18px 0; padding:clamp(16px,3vw,24px); border:1px solid #dce5f1; border-radius:16px; background:radial-gradient(circle at 95% 5%,rgba(212,175,55,.12),transparent 35%),linear-gradient(145deg,#f8fbff,#fff 65%); animation:gpa-card-enter .5s ease-out both; }
+.academic-progress-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.academic-progress-heading h3 { margin:4px 0 0; font-size:1.15rem; }
+.academic-progress-heading .eyebrow { color:var(--dash-muted); font-size:.72rem; font-weight:800; letter-spacing:.12em; }
+.progress-orbit { display:grid; width:72px; aspect-ratio:1; place-items:center; border-radius:50%; background:conic-gradient(#087443 0 var(--progress-value,0%),#e4ebf3 var(--progress-value,0%) 100%); position:relative; }
+.progress-orbit::before { content:""; position:absolute; inset:7px; border-radius:50%; background:#fff; }
+.progress-orbit span { position:relative; color:var(--dash-navy); font-size:.92rem; font-weight:800; font-variant-numeric:tabular-nums; }
+.academic-progress-track { margin:16px 0 8px; }
+.academic-progress-track progress,.term-estimate progress { display:block; width:100%; height:12px; border:0; border-radius:20px; overflow:hidden; accent-color:#087443; }
+.academic-progress-track progress::-webkit-progress-bar,.term-estimate progress::-webkit-progress-bar { border-radius:20px; background:#e4ebf3; }
+.academic-progress-track progress::-webkit-progress-value,.term-estimate progress::-webkit-progress-value { border-radius:20px; background:linear-gradient(90deg,#087443,#42a878); transition:width .65s cubic-bezier(.2,.8,.2,1); }
+.academic-progress-numbers { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px 18px; color:var(--dash-muted); }
+.academic-progress-numbers strong { color:var(--dash-navy); font-size:1.1rem; font-variant-numeric:tabular-nums; }
+.academic-progress-caveat { display:block; margin-top:8px; color:var(--dash-muted); line-height:1.45; }
+.academic-record-summary { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin:16px 0 0; }
+.academic-record-summary span { color:var(--dash-muted); font-size:.9rem; }
+.academic-record-summary strong { display:block; color:var(--dash-navy); font-size:1.15rem; }
+.academic-history>p,.academic-attempt-editor>p,.term-estimates>p { color:var(--dash-muted); font-size:.9rem; line-height:1.5; }
+.academic-attempt-editor { grid-template-columns:2fr 1fr 1fr 1fr auto; }
+.academic-attempt-editor label { margin:0; }
+.academic-attempt-editor>p { grid-column:1/-1; margin:0 0 2px; }
+.term-estimates { display:grid; gap:10px; margin-top:22px; }
+.term-estimates>h3,.academic-history>h3 { margin-bottom:0; }
+.term-estimates>p { margin:0 0 2px; }
+.term-estimate { display:grid; gap:7px; padding:12px 14px; border:1px solid #e1e7ef; border-radius:11px; background:#fff; animation:gpa-card-enter .4s ease-out both; }
+.term-estimate>div { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.term-estimate>div span { color:var(--dash-navy); font-weight:800; font-variant-numeric:tabular-nums; }
+.term-estimate small { color:var(--dash-muted); line-height:1.45; }
+@media(max-width:900px){.academic-attempt-editor{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:560px){.academic-progress-heading{align-items:flex-start}.progress-orbit{width:60px;flex:0 0 60px}.academic-progress-numbers{display:grid}.academic-record-summary{grid-template-columns:1fr}.academic-attempt-editor{grid-template-columns:1fr}.academic-attempt-editor>p{grid-column:auto}}
+@media(prefers-reduced-motion:reduce){.academic-progress-overview,.term-estimate{animation:none}.academic-progress-track progress::-webkit-progress-value,.term-estimate progress::-webkit-progress-value{transition:none}}

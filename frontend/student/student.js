@@ -1,6 +1,6 @@
 import { getApiCandidates, saveApiBase } from '../shared/apiConfig.js';
 import { normalizeCatalog } from '../shared/catalogNormalizer.js';
-import { restoreSession, signOut } from '../shared/session.js';
+import { restoreSession, signOut, startInactivityTimeout } from '../shared/session.js';
 import { escapeHtml } from '../shared/dom.js';
 import { reconcileStudentViewStack, resolveProgramFacultyId } from './navigation.js';
 
@@ -18,6 +18,7 @@ if (!authenticatedUser) {
   location.replace('../student-login.html');
   throw new Error('Student session is not valid.');
 }
+startInactivityTimeout(authenticatedUser, '../index.html');
 document.getElementById('student-sign-out')?.addEventListener('click', () => signOut('../index.html'));
 
 const state = {
@@ -105,12 +106,12 @@ async function fetchJson(path) {
       let res = await fetch(`${base}${path}`, { credentials: 'include', headers: { Accept: 'application/json' }, signal: controller.signal });
       if (res.status === 401) {
         const { response: refreshed } = await refreshStudentSession(base, controller.signal);
-        if (refreshed.status === 401) { window.location.assign('../student-login.html'); const error = new Error('Your session has expired. Please sign in again.'); error.noRetry = true; throw error; }
+        if (refreshed.status === 401) { void signOut('../index.html', { sessionExpiredRole: 'student' }); const error = new Error('Your session has expired. Please sign in again.'); error.noRetry = true; throw error; }
         if (!refreshed.ok) { const error = new Error('The authentication service is temporarily unavailable.'); error.status = refreshed.status; error.noRetry = true; throw error; }
         res = await fetch(`${base}${path}`, { credentials: 'include', headers: { Accept: 'application/json' }, signal: controller.signal });
       }
       if (res.status === 401) {
-        window.location.assign('../student-login.html');
+        void signOut('../index.html', { sessionExpiredRole: 'student' });
         const error = new Error('Authentication required');
         error.noRetry = true;
         throw error;
@@ -541,6 +542,7 @@ function showCourseModal(courseId) {
     </div>
   `;
   elements.viewHierarchyBtn.onclick = () => showHierarchyView(course.id);
+  elements.courseModal.classList.remove('has-course-hierarchy');
   elements.courseModal.classList.add('active');
   elements.courseModal.dataset.courseId = String(course.id);
   document.body.style.overflow = 'hidden';
@@ -557,6 +559,7 @@ function showHierarchyView(courseId) {
   const mandatoryPrerequisites = prerequisiteGroups.filter(group => group.type !== 'alternative').flatMap(group => group.members);
   const alternativePrerequisiteGroups = prerequisiteGroups.filter(group => group.type === 'alternative');
   const dependents = state.data.programCourses.filter((item) => (item.prerequisiteCourseIds || []).includes(course.id));
+  elements.courseModal.classList.add('has-course-hierarchy');
   elements.modalTitle.textContent = `Course Hierarchy - ${course.code}`;
   elements.modalBody.innerHTML = `
     <div class="hierarchy-view-boxes">
@@ -617,12 +620,32 @@ function showHierarchyView(courseId) {
         const prerequisiteState = courseCompletionState(prerequisite);
         const selectedState = courseCompletionState(course);
         const relevantState = isPrerequisite ? prerequisiteState : selectedState;
-        const statusMessage = relevantState.uncertain
-          ? `Multiple ${isPrerequisite ? prerequisite.code : course.code} attempts are recorded; the university repeat policy is needed to confirm this prerequisite for ${dependent.code}.`
-          : relevantState.passed
-            ? `${isPrerequisite ? prerequisite.code : course.code} is completed and satisfies its prerequisite link for ${dependent.code}.`
-            : `Complete ${isPrerequisite ? prerequisite.code : course.code} to satisfy a prerequisite requirement for ${dependent.code}.`;
-        const label = relevantState.uncertain ? 'REPEAT POLICY' : relevantState.passed ? 'PREREQUISITE SATISFIED' : 'COMPLETE TO UNLOCK';
+        const requirement = dependent.prerequisiteGroups?.find(group => (group.members || []).some(member => Number(member.courseId ?? member.id ?? member) === Number(prerequisite.id)));
+        const alternativeGroup = requirement?.type === 'alternative' ? requirement : null;
+        const otherPassedOption = alternativeGroup && (alternativeGroup.members || [])
+          .map(member => courseById(Number(member.courseId ?? member.id ?? member)))
+          .filter(item => item && Number(item.id) !== Number(prerequisite.id))
+          .find(item => courseCompletionState(item).passed && !courseCompletionState(item).uncertain);
+        let statusMessage;
+        let label;
+        if (alternativeGroup && otherPassedOption) {
+          statusMessage = `${alternativeGroup.label}: ${otherPassedOption.code} already satisfies this OR group for ${dependent.code}. ${prerequisite.code} is another option and is not needed for eligibility.`;
+          label = 'OR OPTION ALREADY SATISFIED';
+        } else if (relevantState.uncertain) {
+          statusMessage = `Multiple ${prerequisite.code} attempts are recorded; the university repeat policy is needed to confirm this prerequisite for ${dependent.code}.`;
+          label = 'REPEAT POLICY';
+        } else if (relevantState.passed) {
+          statusMessage = alternativeGroup
+            ? `${alternativeGroup.label}: ${prerequisite.code} is completed and satisfies one option for ${dependent.code}.`
+            : `${prerequisite.code} is completed and satisfies its prerequisite for ${dependent.code}.`;
+          label = alternativeGroup ? 'OR OPTION SATISFIED' : 'PREREQUISITE SATISFIED';
+        } else if (alternativeGroup) {
+          statusMessage = `Choose one course in “${alternativeGroup.label}” for ${dependent.code}. Completing ${prerequisite.code} is one way to satisfy this group.`;
+          label = 'CHOOSE ANY ONE OPTION';
+        } else {
+          statusMessage = `Complete ${prerequisite.code} to satisfy a prerequisite requirement for ${dependent.code}.`;
+          label = 'COMPLETE TO UNLOCK';
+        }
         activeRelationship = { prerequisite: prerequisiteCard, dependent: dependentCard, label };
         const oppositeRow = paired.closest('.hierarchy-row');
         oppositeRow.scrollTo({ left: centeredScrollPosition(paired, oppositeRow), behavior: reduceMotion ? 'auto' : 'smooth' });
@@ -821,6 +844,7 @@ function showRelatedCourseChoice(course) {
 
 function closeModal() {
   elements.courseModal.classList.remove('active');
+  elements.courseModal.classList.remove('has-course-hierarchy');
   delete elements.courseModal.dataset.courseId;
   document.body.style.overflow = '';
 }

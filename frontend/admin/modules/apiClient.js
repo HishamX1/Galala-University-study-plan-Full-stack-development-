@@ -1,4 +1,5 @@
 import { getApiCandidates, normalizeApiBase, saveApiBase } from '../../shared/apiConfig.js';
+import { signOut } from '../../shared/session.js';
 
 const apiCandidates = getApiCandidates();
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -70,7 +71,7 @@ export async function request(path, options = {}) {
           error.code = 'SESSION_EXPIRED';
           error.definitiveAuthFailure = true;
           error.noRetry = true;
-          window.location.assign('../admin-login.html');
+          void signOut('../index.html', { sessionExpiredRole: window.__GU_ADMIN_ROLE__ || 'regular_admin' });
           throw error;
         } else if (refreshed.status >= 500) {
           const error = new Error('The authentication service is temporarily unavailable.');
@@ -104,7 +105,7 @@ export async function request(path, options = {}) {
         if (data.code === 'STALE_WRITE') error.noRetry = true;
         if (path.startsWith('/admin/import') && [409, 410, 422, 429].includes(res.status)) error.noRetry = true;
         if (res.status === 401 && path === '/auth/refresh') {
-          window.location.assign('../admin-login.html');
+          void signOut('../index.html', { sessionExpiredRole: window.__GU_ADMIN_ROLE__ || 'regular_admin' });
           error.noRetry = true;
         }
         throw error;
