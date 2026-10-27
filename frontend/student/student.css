@@ -1391,3 +1391,29 @@
   .hierarchy-view-boxes.has-focus .hierarchy-card[data-relation-kind] { transition:none; }
   .hierarchy-relationship-path { animation:none; stroke-dasharray:none; }
 }
+
+/* The hierarchy needs enough width to show its alternatives and arrow targets
+   together without making the compact course-detail modal larger. */
+.gu-modal-overlay.has-course-hierarchy .gu-modal {
+  width: min(1040px, calc(100vw - 32px));
+  max-width: 1040px;
+  max-height: min(92dvh, 900px);
+}
+.gu-modal-overlay.has-course-hierarchy .gu-modal-body { overflow: auto; }
+.hierarchy-row .hierarchy-card {
+  flex-basis: calc((100% - (3 * var(--space-3))) / 4);
+}
+.hierarchy-card-header { padding: var(--space-2) var(--space-3); }
+.hierarchy-card-body { padding: var(--space-3); }
+.hierarchy-card-title { font-size: var(--text-sm); line-height: 1.35; }
+.hierarchy-relationship-label { font-size: 12px; font-weight: 800; }
+@media (max-width: 700px) {
+  .gu-modal-overlay.has-course-hierarchy .gu-modal {
+    width: calc(100vw - 16px);
+    max-height: 94dvh;
+  }
+  .hierarchy-row .hierarchy-card { flex-basis: min(78vw, 220px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hierarchy-relationship-path { animation: none; }
+}

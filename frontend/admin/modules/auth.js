@@ -3,7 +3,7 @@ import { elements, setMessage, withButtonBusy, withAdminLoading } from './adminD
 import { openConfirmDialog, openFormDialog } from './dialogs.js';
 import { loadRelations } from './dataLoader.js';
 import { loadAdminOps, loadAdminSection } from './adminOps.js';
-import { signOut } from '../../shared/session.js';
+import { signOut, startInactivityTimeout } from '../../shared/session.js';
 import { activateAdminTab, resolveAdminTab } from '../../shared/adminNavigation.js';
 import { cache } from './state.js';
 
@@ -188,6 +188,8 @@ export function setupLogin() {
     try {
       const { user } = await request('/auth/admin-login', { method: 'POST', body: JSON.stringify({ identifier: username, password }) });
       if (!['regular_admin', 'super_admin'].includes(user.role)) { window.location.assign('../denied.html'); return; }
+      startInactivityTimeout(user, '../index.html');
+      window.__GU_ADMIN_ROLE__ = user.role;
       cache.adminRole = user.role;
       elements.loginCard.hidden = true;
       elements.dashboard.hidden = false;
@@ -324,6 +326,8 @@ export function setupLogin() {
 
   withAdminLoading('Verifying your administrator session…', () => request('/auth/me')).then(async ({ user }) => {
     if (!['regular_admin', 'super_admin'].includes(user.role)) { window.location.assign('../denied.html'); return; }
+    window.__GU_ADMIN_ROLE__ = user.role;
+    startInactivityTimeout(user, '../index.html');
     cache.adminRole = user.role;
     elements.loginCard.hidden = true;
     elements.dashboard.hidden = false;
@@ -333,7 +337,7 @@ export function setupLogin() {
     await openRequestedAdminDestination(user.role, getManagedUsers);
   }).catch((error) => {
     if (error.definitiveAuthFailure || error.status === 401) {
-      window.location.assign('../admin-login.html');
+      void signOut('../index.html', { sessionExpiredRole: window.__GU_ADMIN_ROLE__ || 'regular_admin' });
       return;
     }
     elements.loginCard.hidden = false;

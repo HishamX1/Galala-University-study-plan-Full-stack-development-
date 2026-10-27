@@ -88,8 +88,10 @@ const studentPage = await readFile(new URL('../frontend/student/student.js', imp
 const adminAuth = await readFile(new URL('../frontend/admin/modules/auth.js', import.meta.url), 'utf8');
 assert.match(studentPage, /if \(authenticatedUser\?\.unavailable\)[\s\S]*?if \(!authenticatedUser\) \{[\s\S]*?location\.replace\('\.\.\/student-login\.html'\)/,
   'students with expired or revoked refresh sessions retain the student-login redirect');
-assert.match(adminAuth, /window\.location\.assign\('\.\.\/admin-login\.html'\)/,
-  'administrators with expired or revoked refresh sessions retain the admin-login redirect');
+assert.match(adminAuth, /sessionExpiredRole: window\.__GU_ADMIN_ROLE__ \|\| 'regular_admin'/,
+  'administrators with expired or revoked sessions return home with an administrator-specific message');
+assert.match(adminAuth, /withAdminLoading\('Verifying your administrator session…'[\s\S]*?startInactivityTimeout\(user, '\.\.\/index\.html'\)/,
+  'restored administrator sessions start the shared inactivity timer');
 
 clearAuthenticatedState();
 let logoutCalls = 0;

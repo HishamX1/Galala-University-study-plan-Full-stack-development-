@@ -4,7 +4,22 @@ const studentAction = document.getElementById('student-portal-action');
 const adminAction = document.getElementById('admin-portal-action');
 const user = await restoreSession();
 const logoutUnconfirmed = new URLSearchParams(location.search).get('logout') === 'server-unconfirmed';
-if (user?.unavailable || logoutUnconfirmed) {
+const params = new URLSearchParams(location.search);
+const timedOutRole = params.get('sessionTimeout');
+const expiredRole = params.get('sessionExpired');
+if (timedOutRole || expiredRole) {
+  const role = timedOutRole || expiredRole;
+  const audience = role === 'student' ? 'student' : 'administrator';
+  const status = document.createElement('p');
+  status.className = 'session-return-notice';
+  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
+  status.textContent = timedOutRole
+    ? `For your security, your ${audience} session ended after 5 minutes without activity. Please sign in again to continue.`
+    : `Your ${audience} session expired. Please sign in again to continue.`;
+  if (logoutUnconfirmed) status.textContent += ' The service could not confirm server-side session revocation; reconnect before signing in again.';
+  document.querySelector('main')?.prepend(status);
+} else if (user?.unavailable || logoutUnconfirmed) {
   const status = document.createElement('p');
   status.setAttribute('role', 'status');
   status.textContent = logoutUnconfirmed
