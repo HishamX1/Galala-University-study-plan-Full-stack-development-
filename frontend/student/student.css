@@ -1417,3 +1417,16 @@
 @media (prefers-reduced-motion: reduce) {
   .hierarchy-relationship-path { animation: none; }
 }
+
+/* Compact the existing prerequisite and dependent course cards. */
+.hierarchy-view-boxes { gap: var(--space-3); padding: var(--space-2) 0; }
+.hierarchy-level { gap: var(--space-2); }
+.hierarchy-row { gap: var(--space-2); padding-bottom: var(--space-1); }
+.hierarchy-row .hierarchy-card { flex-basis: calc((100% - (4 * var(--space-2))) / 5); }
+.hierarchy-prerequisite-groups { gap: var(--space-2); }
+.hierarchy-prerequisite-group h6 { margin-bottom: var(--space-1); }
+.hierarchy-card-header { padding: var(--space-1) var(--space-2); }
+.hierarchy-card-body { padding: var(--space-2); gap: var(--space-1); }
+.hierarchy-card-title { line-height: 1.25; }
+.hierarchy-academic-status, .hierarchy-academic-eligibility { margin-top: var(--space-1); }
+@media (max-width: 700px) { .hierarchy-row .hierarchy-card { flex-basis: min(76vw, 210px); } }
